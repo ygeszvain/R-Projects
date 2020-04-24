@@ -1,0 +1,768 @@
+---
+title: 'Final project '
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(reshape2)
+library(maps)
+library(mapdata)
+library(zipcode)
+library(sqldf)
+library(gdata)
+library(kernlab)
+library(e1071)
+library(gridExtra)
+library(neuralnet)
+library(tidytext)
+library(readtext)
+library(OptimalCutpoints)
+library(tm)
+library(wordcloud)
+library(slam)
+```
+
+## Group Members
+
+Baskar Dakshinamoorthy, Guillermo Gonzalez, Thomas Freitas, Yen Yung Geszvain
+
+## Project Summary
+
+Corey Oil, LTD. is an oil distributor/wholesaler located in Wisconsin. 40 years of oil selling history has contributed a highly loyal customer group. The dedication to providing product service, knowledge, and competitive prices promotes excellent customer relationship and stable selling history. However, the challenge is to identify the strength of the products. For example, what type of oil is selling and what products are not. 
+
+This group project aims to prepare and collect a dataset that is valuable for data and business analysis. The goal of the project is to turn the data into valuable proposals and suggestions via descriptive analytics, predictive analytics, and quantitative analytics.
+
+## Dataset
+
+The team has selected an invoice dataset from the Corey Oil database.
+
+## Developing Questions
+
+1. What is the dataset?
+2. What is the value of the dataset? Why is it important?
+3. How can we turn raw data into readable analysis and reports?
+4. How can we improve the business operations with the analysis and recommendation? What are the business areas being affected for the improvement? 
+5. What effect will the project impact the business results?
+
+## Data Gathering
+
+We collect the invoice data from Corey Oil database. We filtered the dataset to include only 2018 invoice data. As the market evolves, we want to ensure that we analyze the data which is current and up to date.
+
+```{r}
+Corey_Oil <- read.csv("Corey_Oil_dataset_0909.csv", header=TRUE,sep=";")
+summary(Corey_Oil)
+```
+
+ ##Data Preprocessing:
+
+Before preprocessing, the Corey Oil dataset had 28000 rows and 32 variables. All these data sets contained information regarding various attributes of Corey Oil. The data sets contained numerous NA values, which were best dealt with by omitting them, #as working on substantial values makes more sense than assuming some calculated values #such as mean. Only the columns that are relevant to the analysis of data have been kept, while the #remaining columns were eliminated from the dataset. After Preprocessing the data we ended up with 14620 rows and 17 Variables. In summary, the data preprocessing phase provides a subset of usable data for the project, consisting of only the columns that need to be worked with and eliminating Null/NA values. 
+
+#Following is the code for data preprocessing
+
+```{r}
+#Check if there is any NAs
+any(is.na(Corey_Oil))
+#Remove Columns that have empty Rows
+Corey_Oil <- na.omit(Corey_Oil)
+#Total Number of NAs in each column
+colSums(is.na(Corey_Oil))
+#Remove decimal points
+Corey_Oil$Refn <- as.character(gsub(".00", "", Corey_Oil$Refn))
+Corey_Oil$CNUM <- as.character(gsub(".00", "", Corey_Oil$CNUM))
+#Subsetting only UM = G that are needed for our analysis to a new dataframe and where Total Amount is Not null
+Corey_Oil_Analysis <- sqldf("select * from Corey_Oil where UM = 'G'")
+head.matrix(Corey_Oil_Analysis,n=10)
+#Total Number of NAs in each column
+colSums(is.na(Corey_Oil_Analysis))
+sqldf("select count(*) from Corey_Oil_Analysis")
+str(Corey_Oil_Analysis)
+#Convert data type - convert the value to characters then numbers
+Corey_Oil_Analysis$COST <- as.numeric(as.character(Corey_Oil_Analysis$COST))
+#Data Preview
+head.matrix(Corey_Oil_Analysis,n=10)
+tail.matrix(Corey_Oil_Analysis,n=10)
+summary(Corey_Oil_Analysis)
+
+#this is to correct the totalsales column
+Corey_Oil_Analysis$TotalSales <- (Corey_Oil_Analysis$PRICE * Corey_Oil_Analysis$MEAS * Corey_Oil_Analysis$QSHIP)
+Corey_Oil_Analysis$TotalSales <- round(Corey_Oil_Analysis$TotalSales, 2)
+#this is to create a totalcost column
+Corey_Oil_Analysis$TotalCost <- (Corey_Oil_Analysis$COST * Corey_Oil_Analysis$MEAS * Corey_Oil_Analysis$QSHIP)
+Corey_Oil_Analysis$TotalCost <- round(Corey_Oil_Analysis$TotalCost, 2)
+#this is to create a Profit column
+Corey_Oil_Analysis$Profit <- (Corey_Oil_Analysis$TotalSales - Corey_Oil_Analysis$TotalCost)
+Corey_Oil_Analysis$Profit <- round(Corey_Oil_Analysis$Profit, 2)
+head(Corey_Oil_Analysis)
+```
+
+## Date Grouping
+
+The data were cleaned up in order to show better plots that are associated with specific items. These items consisted of the highest selling, most frequently ordered, most expensive to the company, and the highest profiting products for the company. The analysis of these data is all very similar. We chose to find the top 30 products for each category. The Corey Oil data frame was aggregated and ranked by the highest values and matched to the PNUM. The scatter plots show these values.
+
+# Data Grouping - TOP 30 by Total Sales
+
+```{r}
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis[,c(6,7,10)]
+str(Corey_Oil_Analysis_Rank)
+
+Corey_Oil_Analysis_Rank$TotalSales <- as.numeric(as.character(Corey_Oil_Analysis_Rank$TotalSales))
+Corey_Oil_Analysis_Rank <- aggregate(Corey_Oil_Analysis_Rank$TotalSales, list(PNUM=Corey_Oil_Analysis_Rank$PNUM), sum)
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis_Rank[order(-Corey_Oil_Analysis_Rank$x),]
+
+head.matrix(Corey_Oil_Analysis_Rank,n=30)
+Corey_Oil_Analysis_TOP30Sales <- sqldf("select * from Corey_Oil where UM = 'G' and PNUM in ('2UL/RF','12HS','22LS','22HS','1UL/RF','2P/RF','DS15W40','5W30SB','80565-29811','2K','AF31','622515001097','2CAM2','5W30SYN','11HS','METHANOL','5W20SB','1P/RF','1UL/C','622723001097','661460008097','0W20SYN','HY32','THP','110B','80565-30911','HY46','1K','622721001097')")
+Corey_Oil_Analysis_TOP30Sales$TotalSales <- as.numeric(as.character(Corey_Oil_Analysis_TOP30Sales$TotalSales))
+head(Corey_Oil_Analysis_TOP30Sales)
+```
+
+# Data Grouping - TOP 30 by Quantity Shipped
+
+```{r}
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis[,c(6,7,14)]
+str(Corey_Oil_Analysis_Rank)
+
+Corey_Oil_Analysis_Rank$QSHIP <-as.numeric(as.character(Corey_Oil_Analysis_Rank$QSHIP))
+Corey_Oil_Analysis_Rank <- aggregate(Corey_Oil_Analysis_Rank$QSHIP, list(PNUM=Corey_Oil_Analysis_Rank$PNUM), sum)
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis_Rank[order(-Corey_Oil_Analysis_Rank$x),]
+head.matrix(Corey_Oil_Analysis_Rank,n=30)
+
+Corey_Oil_Analysis_TOP30QSHIP <- sqldf("select * from Corey_Oil where UM = 'G' and PNUM in ('12HS','12LS','DEF','METHANOL','1379B','1UL/RF','5W30SB','2UL/RF','22LS','TT','1UL/C','110B','5W20SB','DS15W40','HY46','1K','11HS','AF32','622515001097','AF31','HY32','1P/RF','22HS','622723001097','80565-30911','FUSE110A','80565-29811','AF111','THP','41550')")
+head(Corey_Oil_Analysis_TOP30QSHIP)
+```
+
+# Data Grouping - TOP 30 by Total Cost
+
+```{r}
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis[,c(6,7,18)]
+str(Corey_Oil_Analysis_Rank)
+
+Corey_Oil_Analysis_Rank$TotalCost <- as.numeric(as.character(Corey_Oil_Analysis_Rank$TotalCost))
+Corey_Oil_Analysis_Rank <- aggregate(Corey_Oil_Analysis_Rank$TotalCost, list(PNUM=Corey_Oil_Analysis_Rank$PNUM), sum)
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis_Rank[order(-Corey_Oil_Analysis_Rank$x),]
+head.matrix(Corey_Oil_Analysis_Rank,n=30)
+
+Corey_Oil_Analysis_TOP30TotalCost <- sqldf("select * from Corey_Oil_Analysis where UM = 'G' and PNUM in ('12HS','12LS','DEF','METHANOL','1379B','1UL/RF','5W30SB','2UL/RF','22LS','TT','1UL/C','110B','5W20SB','DS15W40','HY46','1K','11HS','AF32','622515001097','AF31','HY32','1P/RF','22HS','622723001097','80565-30911','FUSE110A','80565-29811','AF111','THP','41550')")
+head(Corey_Oil_Analysis_TOP30TotalCost)
+```
+
+# Data Grouping - TOP 30 by Total Profit
+
+```{r}
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis[,c(6,7,19)]
+str(Corey_Oil_Analysis_Rank)
+
+Corey_Oil_Analysis_Rank$Profit <- as.numeric(as.character(Corey_Oil_Analysis_Rank$Profit))
+Corey_Oil_Analysis_Rank <- aggregate(Corey_Oil_Analysis_Rank$Profit, list(PNUM=Corey_Oil_Analysis_Rank$PNUM), sum)
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis_Rank[order(-Corey_Oil_Analysis_Rank$x),]
+head.matrix(Corey_Oil_Analysis_Rank,n=30)
+
+Corey_Oil_Analysis_TOP30Profit <- sqldf("select * from Corey_Oil_Analysis where UM = 'G' and PNUM in ('12HS','12LS','DEF','METHANOL','1379B','1UL/RF','5W30SB','2UL/RF','22LS','TT','1UL/C','110B','5W20SB','DS15W40','HY46','1K','11HS','AF32','622515001097','AF31','HY32','1P/RF','22HS','622723001097','80565-30911','FUSE110A','80565-29811','AF111','THP','41550')")
+head(Corey_Oil_Analysis_TOP30Profit)
+```
+
+
+
+
+
+#Scatterplots of Profit vs. Sales and quantity shipped
+profit.sales <- ggplot(Corey_Oil_Analysis_TOP30Profit, aes(x=Corey_Oil_Analysis_TOP30Profit$TotalCost, y=Corey_Oil_Analysis_TOP30Profit$Profit)) + geom_point(color="blue")
+profit.sales <- profit.sales + xlab("Total Cost") + ylab("Profit") + ggtitle("Total Cost: Profit")
+profit.sales
+
+qship.profit <- ggplot(Corey_Oil_Analysis_TOP30Profit, aes(x=Corey_Oil_Analysis_TOP30Profit$QSHIP, y=Corey_Oil_Analysis_TOP30Profit$Profit)) + geom_point(color="blue")
+qship.profit <- qship.profit + xlab("QSHIP") + ylab("Profit") + ggtitle("Quantity Shipped : Profit")
+qship.profit
+
+
+
+```{r}
+head(Corey_Oil_Analysis)
+PNUM<-Corey_Oil_Analysis$PNUM
+TotalSales<-Corey_Oil_Analysis$TotalSales
+
+#turns off scientific notation
+options(scipen = 999)
+#some graphs from the top30 data, aggregated by pname1
+#plotting the top30 by sales, ship, costs, and profit in pareto chart
+
+TOP30Sales <- setNames(aggregate(Corey_Oil_Analysis_TOP30Sales$TotalSales, by=list(Corey_Oil_Analysis_TOP30Sales$PNUM), FUN=sum), c("PartNumber","TotalSales"))
+TOP30Sales <- ggplot(data = TOP30Sales, aes(x= reorder (PartNumber, -TotalSales), y=TotalSales)) + geom_bar(stat="identity")
+TOP30Sales <- TOP30Sales + theme(axis.text.x = element_text(angle=-90, hjust=0)) + ggtitle("Top 30 items by total sales")
+TOP30Sales <- TOP30Sales + scale_x_discrete(name= "Part Number")
+TOP30Sales <- TOP30Sales + theme(plot.title = element_text(size=20, hjust=0.5))
+TOP30Sales
+
+
+TOP30Ship<- setNames(aggregate(Corey_Oil_Analysis_TOP30QSHIP$QSHIP, by=list(Corey_Oil_Analysis_TOP30QSHIP$PNUM), FUN=sum), c("PartNumber","QuantityShip"))
+TOP30Ship <- ggplot( data = TOP30Ship, aes(x=reorder (PartNumber, -QuantityShip), y=QuantityShip)) + geom_bar(stat="identity")
+TOP30Ship <- TOP30Ship + theme(axis.text.x = element_text(angle=-90, hjust=0)) +ggtitle("Top 30 items by quantity shipped")
+TOP30Ship <- TOP30Ship + scale_x_discrete(name="Part Number")
+TOP30Ship <- TOP30Ship + theme(plot.title = element_text(size=20, hjust=0.5))
+TOP30Ship
+
+TOP30Cost <- setNames(aggregate(Corey_Oil_Analysis_TOP30TotalCost$TotalCost, by=list(Corey_Oil_Analysis_TOP30TotalCost$PNUM), FUN=sum), c("PartNumber","TotalCosts"))
+TOP30Cost <- ggplot( data = TOP30Cost, aes(x=reorder (PartNumber, -TotalCosts), y=TotalCosts)) + geom_bar(stat="identity")
+TOP30Cost <- TOP30Cost + theme(axis.text.x = element_text(angle=-90, hjust=0)) +ggtitle("Top 30 items by Product Costs")
+TOP30Cost <- TOP30Cost + scale_x_discrete(name="Part Number")
+TOP30Cost <- TOP30Cost + theme(plot.title = element_text(size=20, hjust=0.5))
+TOP30Cost
+
+TOP30Profit<- setNames(aggregate(Corey_Oil_Analysis_TOP30QSHIP$QSHIP, by=list(Corey_Oil_Analysis_TOP30Profit$PNUM), FUN=sum), c("PartNumber","Profit"))
+TOP30Profit <- ggplot( data = TOP30Profit, aes(x=reorder (PartNumber, -Profit), y=Profit)) + geom_bar(stat="identity")
+TOP30Profit <- TOP30Profit + theme(axis.text.x = element_text(angle=-90, hjust=0)) +ggtitle("Top 30 items by Total Profits")
+TOP30Profit <- TOP30Profit + scale_x_discrete(name="Part Number")
+TOP30Profit <- TOP30Profit + theme(plot.title = element_text(size=20, hjust=0.5))
+TOP30Profit
+```
+
+The following bar plot is an interesting graph. The total sales bar shown represents the total sales that the company had. The total cost bar represents the amount that the product cost the company. As previously stated, when they are subtracted from each other, the leftover amount is the profit for the company. The second and third bar should equal the first bar. To compute those, the sum command was used for all three of those columns.
+
+```{r}
+#this is a simple barplot with sale info
+allsales <- sum(Corey_Oil_Analysis$TotalSales)
+allcosts <- sum(Corey_Oil_Analysis$TotalCost)
+allprofits <- sum(Corey_Oil_Analysis$Profit)
+allchart <- c(allsales,allcosts,allprofits)
+barplot(allchart, main="Totals for Sales, Costs, and Profits", names.arg=c("Total Sales", "Total Costs", "Total Profit"))
+```
+
+## Linear Regression
+
+A linear regression analysis was performed. If the line of best fit can be computed, the expected sales and profit can be calculated from the cost of the product. By calling the lm() function, we were able to get the summary and see that the formula for the regression is “Sales =1.096 (Cost) + 77.” The R-squared value of this regression is 0.9715, which is a very good line fit. The P value is extremely low,  (P< 2.2^10-16), meaning these analyses are statistically significant.
+A plot was made from these data using three variables, cost (x-axis), sales (y-axis), and profit (darkness of blue). The plot also includes the formula for the line and the R^2 value. Along with this, the code has a function that requests the cost of an item and returns the expected profit from that sale using the regression analysis data.
+
+#linear regression using cost to determine sales and possibly profit
+```{r}
+salescostprofitreg <- lm(TotalSales ~ TotalCost, data=Corey_Oil_Analysis)
+summary (salescostprofitreg)
+```
+
+#This plot has linear modeling added and a function to test the profit based on the cost
+```{r}
+salescostprofit <- ggplot(Corey_Oil_Analysis, aes(y=TotalSales,x=TotalCost,color=Profit))
+salescostprofit <- salescostprofit + geom_point(size=1)
+salescostprofit <- salescostprofit + ggtitle("Sales, Cost, and Profit")
+salescostprofit <- salescostprofit +  theme(plot.title = element_text(size=20, hjust=0.5))
+salescostprofit <- salescostprofit + xlim(0, 31000) + ylim(0, 31000)
+salescostprofit <- salescostprofit + geom_abline(intercept = 77, slope =1.09 )
+salescostprofit <- salescostprofit + geom_text(x = 15000, y = 30000, label = "Y=1.09X + 77, R^2 = 0.9715")
+salescostprofit
+```
+
+#this function allows you to input a cost, and get the expected profit
+```{r}
+estimatedprofit<- function(testcost)
+{
+  expectedsales <- (testcost * 1.09) + 77
+  expectedprofit <- (expectedsales-testcost)
+  return (expectedprofit)
+}
+```
+# 2327 is the expected profit for cost @ $25000
+```{r}
+estimatedprofit (25000) 
+```
+
+## Histogram for profit vs product 
+
+```{r}
+tot.sales <- ggplot(Corey_Oil_Analysis_TOP30Sales, aes(x=TotalSales)) + geom_histogram(binwidth=25, color="blue", fill="white")
+tot.sales
+
+gbox.totsales <- ggplot(Corey_Oil_Analysis_TOP30Sales, aes(x=factor(0),TotalSales)) + geom_boxplot(fill="blue")
+gbox.totsales
+```
+
+## Map Plots
+
+The data of sales by specific zip codes was aggregated and merged. The data were plotted in a map of the USA by zip code using ggplot2. The size of each dot represents the sales for that zip code. The most obvious part of this map is that most of the data come directly from Wisconsin. Therefore the same data were compiled only for Wisconsin and a new map was made. The map is only showing the Wisconsin data. Along with this plot, a similar plot was made of using the total profit within the zip codes. There are slight differences between both of these plots.
+
+```{r}
+removeaxis <- theme(
+  axis.text = element_blank(),
+  axis.line = element_blank(),
+  axis.ticks = element_blank(),
+  panel.border = element_blank(),
+  panel.grid = element_blank(),
+  axis.title = element_blank())
+
+data(zipcode)
+Corey_Oil_Analysis_LatLon <- merge(Corey_Oil_Analysis, zipcode, by.x="STZIP", by.y = "zip")
+head(Corey_Oil_Analysis_LatLon)
+
+#aggregate to get totals by zip
+oil_agg_totalsales_by_zip<- setNames(aggregate(Corey_Oil_Analysis_LatLon$TotalSales, by=list(Corey_Oil_Analysis_LatLon$STZIP), FUN=sum), c("Zipcode","TotalSales"))
+oil_agg_totalsales_by_zip<- merge(x=oil_agg_totalsales_by_zip, y=zipcode, by.x = "Zipcode", by.y = "zip")
+head(oil_agg_totalsales_by_zip)
+
+#this gives us the total cost of all purchases nationwide
+mapUSA <- map_data("usa")
+mapUSA <- ggplot(data = mapUSA) + geom_polygon(aes(x = long, y = lat, group = group), fill = "light blue", color = "black", alpha = 0.3) + coord_fixed(1.3)
+mapUSA <- mapUSA + geom_point(data= oil_agg_totalsales_by_zip, aes(size=TotalSales, x = longitude, y = latitude), color="blue")
+mapUSA <- mapUSA + scale_size_continuous(range = c(range = c(1, 6)))
+mapUSA <- mapUSA + removeaxis + ggtitle("Total Sales across USA by Zipcode")
+mapUSA <- mapUSA + theme(plot.title = element_text(hjust = 0.5))
+mapUSA
+
+#This will get rid of the non WI data
+Corey_Oil_Analysis_LatLonWI <- Corey_Oil_Analysis_LatLon[Corey_Oil_Analysis_LatLon$state == "WI", ]
+#this will rerun the aggregates
+oil_agg_totalsales_by_zipWI<- setNames(aggregate(Corey_Oil_Analysis_LatLonWI$TotalSales, by=list(Corey_Oil_Analysis_LatLonWI$STZIP), FUN=sum), c("Zipcode","TotalSales"))
+oil_agg_totalsales_by_zipWI<- merge(x=oil_agg_totalsales_by_zipWI, y=zipcode, by.x = "Zipcode", by.y = "zip")
+head(oil_agg_totalsales_by_zipWI)
+
+#since most of the sales are in Wisconsin, this is wisconsin only
+states <- map_data("state")
+dim(states)
+wisconsin <- subset(states, region %in% c("wisconsin"))
+mapWI <- ggplot(data = wisconsin) + geom_polygon(aes(x = long, y = lat, group = group), fill = "light blue", color = "black", alpha = 0.3) + coord_fixed(1.3)
+mapWI <- mapWI + geom_point(data= oil_agg_totalsales_by_zipWI, aes(size=TotalSales, x = longitude, y = latitude), color="blue")
+mapWI <- mapWI + scale_size_continuous(range = c(range = c(1, 6)))
+mapWI <- mapWI + removeaxis + ggtitle("Total Sales in Wisconsin by Zipcode")
+mapWI <- mapWI + theme(plot.title = element_text(hjust = 0.5))
+mapWI
+
+#These are the total profits for Wisconsin
+oil_agg_profits_by_zipWI<- setNames(aggregate(Corey_Oil_Analysis_LatLonWI$Profit, by=list(Corey_Oil_Analysis_LatLonWI$STZIP), FUN=sum), c("Zipcode","Profit"))
+oil_agg_profits_by_zipWI<- merge(x=oil_agg_profits_by_zipWI, y=zipcode, by.x = "Zipcode", by.y = "zip")
+head(oil_agg_profits_by_zipWI)
+
+states <- map_data("state")
+dim(states)
+wisconsin <- subset(states, region %in% c("wisconsin"))
+mapWIProfit <- ggplot(data = wisconsin) + geom_polygon(aes(x = long, y = lat, group = group), fill = "light blue", color = "black", alpha = 0.3) + coord_fixed(1.3)
+mapWIProfit <- mapWIProfit + geom_point(data= oil_agg_profits_by_zipWI, aes(size=Profit, x = longitude, y = latitude), color="blue")
+mapWIProfit <- mapWIProfit + scale_size_continuous(range = c(range = c(1, 6)))
+mapWIProfit <- mapWIProfit + removeaxis + ggtitle("Profits in Wisconsin by Zipcode")
+mapWIProfit <- mapWIProfit + theme(plot.title = element_text(hjust = 0.5))
+mapWIProfit
+```
+
+## Neural Network Analysis
+The objective of this Neural Network is to predict the total Sales of a product (Y) We use Price, cost, Qship as Input Variables. We scaled the data using Max_Min Normalization and passed it to the training and test set. A training set is used to find the relationship between the dependent and independent variables while the test set assesses the performance of the model. We use 60% of the dataset as a training set. The assignment of the data to training and test set is done using random sampling. We perform random sampling on R using sample ( )function. We have used set.seed( ) to generate the same random sample each time and maintain consistency
+
+```{r}
+library(neuralnet,pos=17)
+Corey_Oil_neuralnet<-sqldf("select TotalSales,price,cost,QSHIP from Corey_Oil_Analysis")
+colSums(is.na(Corey_Oil_neuralnet))
+summary(Corey_Oil_neuralnet)
+dim(Corey_Oil_neuralnet)
+#Scaling of Data
+#MAX-MIN NORMALIZATION
+ normalize <- function(x) {
+    return ((x - min(x)) / (max(x) - min(x)))
+  }
+ maxmindf <- as.data.frame(lapply(Corey_Oil_neuralnet, normalize))
+dim(maxmindf)
+##Before we actually call the neuralnetwork() function we need to create a formula to insert into the machine learning model. 
+##The neuralnetwork() function won't accept the typical decimal R format for a formula involving all features (e.g. y ~.). 
+##However, we can use a simple script to create the expanded formula and save us some typing:
+ feats <- names(maxmindf[,2:4])
+ f <- paste(feats,collapse=' + ')
+ f <- paste('TotalSales ~',f)
+ f
+ f <- as.formula(f)
+ f
+ 
+ #Create Training and Testing Data Set using Random Sampling
+ samplesize = 0.60 * nrow(maxmindf)
+ samplesize
+ set.seed(80)
+ 
+ index=sample(seq_len ( nrow(maxmindf)),size= samplesize)
+ trainset=maxmindf[index,]
+ dim(trainset)
+ testset=maxmindf[ -index,]
+dim(testset) 
+head(testset)
+#Run the NeuralNetwork using hidden=c(1,2)
+Corey_Neuralt<-neuralnet(f,trainset,hidden=2,lifesign = "minimal",linear.output = TRUE,threshold = 0.01)
+plot(Corey_Neuralt,rep="best")
+Corey_Neuralt$result.matrix
+#Model Validation
+#
+results<-data.frame(actual=testset$TotalSales,prediction=Corey_Neuralt1.results$net.result)
+head(results)
+percentCorrect2 <- (results[1,1]+results[2,2])/(results[1,1]+results[1,2]+results[2,1]+results[2,2])*100
+percentCorrect2
+##Model Validation and plotting neuralNet Prediction vs Actual Total Sales
+pred_neuralnet.scaled   <- Corey_Neuralt1.results$net.result *(max(maxmindf$TotalSales)-min(maxmindf$TotalSales))+min(maxmindf$TotalSales)
+real.values <- (testset$TotalSales)*(max(maxmindf$TotalSales)-min(maxmindf$TotalSales))+min(maxmindf$TotalSales)
+MSE.neuralnetModel  <- sum((real.values - pred_neuralnet.scaled)^2)/nrow(testset)
+MSE.neuralnetModel
+plot(real.values, pred_neuralnet.scaled, col='red',main='Real Sales  vs  predicted Sales',pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='NN',pch=18,col='red',  bty='n')
+```
+
+## Machine Learning - Randy
+
+We applied association rules mining to our dataset. We focus on the association among quantity shipped, prices, and costs. We applied three different models to execute the prediction and testing methods. Each model returns different prediction results. We evaluate results and utilize the best model base on fitting. 
+
+```{r}
+# Step 1: Load the data
+str(Corey_Oil_Analysis)
+Corey_Oil_Analysis_m <- data.frame(Corey_Oil_Analysis[1:1000,c(8,9,14)]) 
+str(Corey_Oil_Analysis_m)
+colnames(Corey_Oil_Analysis_m)[colSums(is.na(Corey_Oil_Analysis_m)) > 0] # find which columns in the dataframe contain NAs.
+Corey_Oil_Analysis_m$QSHIP[is.na(Corey_Oil_Analysis_m$QSHIP)] <- mean(Corey_Oil_Analysis_m$QSHIP, na.rm=TRUE) # find the NAs in column "QSHIP" and replace them by the mean value of this column
+Corey_Oil_Analysis_m$PRICE[is.na(Corey_Oil_Analysis_m$PRICE)] <- mean(Corey_Oil_Analysis_m$PRICE, na.rm=TRUE)# find the NAs in column "PRICE" and replace those NAs by the mean value of this column
+# --------------------------------------------------------------------
+# Step 2: Create train and test data sets
+# create a list of random index for Corey_Oil_Analysis_m data and store the index in a variable called "ranIndex"
+# 
+dim(Corey_Oil_Analysis_m)
+Corey_Oil_Analysis_m[1:5,]
+randIndex <- sample(1:dim(Corey_Oil_Analysis_m)[1])
+head(randIndex)
+length(randIndex)
+Corey_Oil_Analysis_m[148,]
+Corey_Oil_Analysis_m[45,]
+#  
+#  # In order to split data, create a 2/3 cutpoint and round the number
+cutpoint2_3 <- floor(2*dim(Corey_Oil_Analysis_m)[1]/3)
+# check the 2/3 cutpoint
+cutpoint2_3
+#  
+# create train data set, which contains the first 2/3 of overall data
+#  
+trainData <- Corey_Oil_Analysis_m[randIndex[1:cutpoint2_3],]
+dim(trainData)
+head(trainData)
+#  
+# create test data, which contains the left 1/3 of the overall data
+#  
+testData <- Corey_Oil_Analysis_m[randIndex[(cutpoint2_3+1):dim(Corey_Oil_Analysis_m)[1]],]
+dim(testData)   # check test data set
+head(trainData)
+
+#------------------------------------------------------lm model
+model <- lm(QSHIP ~.,data=trainData)
+lmPred <- predict(model,testData)
+
+str(lmPred)
+compTable3 <- data.frame(testData[,1],lmPred)
+colnames(compTable3) <- c("test","Pred")
+sqrt(mean((compTable3$test-compTable3$Pred)^2))
+
+#lm plot
+compTable3$error <- abs(compTable3$test - compTable3$Pred)
+Plot3 <- data.frame(compTable3$error, testData$PRICE, testData$COST)
+colnames(Plot3) <- c("error","PRICE","COST")
+lm.plot <- ggplot(Plot3, aes(x=PRICE,y=COST)) + geom_point(aes(size=error, color=error)) + ggtitle("lm")
+lm.plot
+# --------------------------------------------------------------------KSVM
+# Step 3: Build a Model using KSVM & visualize the results
+# 1) Build a model to predict QSHIP and name it "svmOutput"
+#    This is the Training step
+svmOutput <- ksvm(QSHIP~., # set "QSHIP" as the target predicting variable; "." means use all other variables to predict "QSHIP"
+                  data = trainData, # specify the data to use in the analysis
+                  kernel = "rbfdot", # kernel function that projects the low dimensional problem into higher dimensional space
+                  kpar = "automatic",# kpar refer to parameters that can be used to control the radial function kernel(rbfdot)
+                  C = 10, # C refers to "COST of Constrains"
+                  cross = 10, # use 10 fold cross validation in this model
+                  prob.model = TRUE # use probability model in this model
+)
+# check the model
+svmOutput
+
+# 2) Test the model with the testData data set
+svmPred <- predict(svmOutput, # use the built model "svmOutput" to predict 
+                   testData, # use testData to generate predictions
+                   type = "votes" # request "votes" from the prediction process
+)
+
+
+# create a comparison data frame that contains the exact "QSHIP" value and the predicted "QSHIP" value
+# use for RMSE calc 
+
+compTable <- data.frame(testData[,1], svmPred[,1])
+# change the column names to "test" and "Pred"
+colnames(compTable) <- c("test","Pred")
+
+# compute the Root Mean Squared Error
+sqrt(mean((compTable$test-compTable$Pred)^2)) #A smaller value indicates better model performance.
+
+# 3) Plot the results
+# compute absolute error for each case
+compTable$error <- abs(compTable$test - compTable$Pred)
+# create a new dataframe contains error, tempreture and COST
+svmPlot <- data.frame(compTable$error, testData$PRICE, testData$COST, testData$QSHIP)
+# assign column names
+colnames(svmPlot) <- c("error","PRICE","COST", "QSHIP")
+# polt result using ggplot, setting "PRICE" as x-axis and "COST" as y-axis
+plot.ksvm <- ggplot(svmPlot, aes(x=PRICE,y=COST)) + 
+  # use point size and color shade to illustrate how big is the error
+  geom_point(aes(size=error, color=error))+
+  ggtitle("ksvm")
+
+
+# Step 4: Create a "goodQSHIP" variable
+# calculate average QSHIP
+meanTotalSales <- mean(Corey_Oil_Analysis_m$QSHIP,na.rm=TRUE)
+# create a new variable named "goodQSHIP" in train data set
+# goodQSHIP = 0 if QSHIP is below average QSHIP
+# goodQSHIP = 1 if QSHIP is eaqual or above the average QSHIP
+trainData$goodQSHIP <- ifelse(trainData$QSHIP<meanTotalSales, 0, 1)
+# do the same thing for test dataset
+testData$goodQSHIP <- ifelse(testData$QSHIP<meanTotalSales, 0, 1)
+# remove "QSHIP" from train data
+trainData <- trainData[,-1]
+# remove "QSHIP" from test data
+testData <- testData[,-1]
+
+# Step 5: See if we can do a better job predicting 'good' and 'bad' shipments
+# convert "goodQSHIP" in train data from numeric to factor
+trainData$goodQSHIP <- as.factor(trainData$goodQSHIP)
+# convert "goodQSHIP" in test data from numeric to factor
+testData$goodQSHIP <- as.factor(testData$goodQSHIP)
+
+# 1)	Build a model 
+# build a model using ksvm function and use all other variables to predict
+svmGood <- ksvm(goodQSHIP~., # set "QSHIP" as target variable; "." means use all other variables to predict "QSHIP"
+                data=trainData, # specify the data to use in the analysis
+                kernel="rbfdot", # kernel function that projects the low dimensional problem into higher dimensional space
+                kpar="automatic",# kpar refer to parameters that can be used to control the radial function kernel(rbfdot)
+                C=10, # C refers to "COST of Constrains"
+                cross=10, # use 10 fold cross validation in this model
+                prob.model=TRUE # use probability model in this model
+)
+# check the model
+svmGood
+
+# 2) Test the model
+goodPred <- predict(svmGood, # use model "svmGood" to predict
+                    testData # use testData to do the test
+)
+# create a dataframe that contains the exact "goodQSHIP" value and the predicted "goodQSHIP"
+compGood1 <- data.frame(testData[,3], goodPred)
+# change column names
+colnames(compGood1) <- c("test","Pred")
+# Compute the percentage of correct cases
+perc_ksvm <- length(which(compGood1$test==compGood1$Pred))/dim(compGood1)[1]
+perc_ksvm
+
+# Confusion Matrix
+#   
+results <- table(test=compGood1$test, pred=compGood1$Pred)
+print(results)
+
+#       pred
+#  test  0  1
+#     0 21  5      #  read horizontal,, 0 class, 21 identified correctly, 5 incorrectly
+#     1  5 20      #                    1 class, 5 identified incorrectly, 20 correctly
+
+
+
+
+# 3)	Plot the results. 
+# determine the prediction is "correct" or "wrong" for each case
+compGood1$correct <- ifelse(compGood1$test==compGood1$Pred,"correct","wrong")
+# create a new dataframe contains correct, QSHIP and PRICE, and goodZone
+Plot_ksvm <- data.frame(compGood1$correct,testData$QSHIP,testData$COST,testData$goodQSHIP,compGood1$Pred)
+# change column names
+colnames(Plot_ksvm) <- c("correct","PRICE","COST","goodQSHIP","Predict")
+# polt result using ggplot
+# size representing correct/wrong; color representing actual good/bad day; shape representing predicted good/bad day.
+plot.ksvm.good <- ggplot(Plot_ksvm, aes(x=PRICE,y=COST)) + 
+  geom_point(aes(size=correct,color=goodQSHIP,shape = Predict))+
+  ggtitle("ksvm - good/bad QSHIP")
+
+plot.ksvm.good
+
+# --------------------------------------------------------------------SVM Model
+svmGood2 <- svm(goodQSHIP~.,data=trainData,kernel="radial",C=10,cross=10,prob.model=TRUE)
+svmGood2
+
+#test the svm model
+goodPred2 <- predict(svmGood2,testData)
+
+compGood2 <- data.frame(testData[,3],goodPred2)
+colnames(compGood2) <- c("test","Pred")
+perc_svm <- length(which(compGood2$test==compGood2$Pred))/dim(compGood2)[1]
+perc_svm
+#confusion matrix
+results2 <- table(test=compGood2$test,pred=compGood2$Pred)
+print(results2)
+
+#plot results of svm model
+compGood2$correct <- ifelse(compGood2$test==compGood2$Pred,"correct","wrong")
+plot.svm <- data.frame(compGood2$correct,testData$QSHIP,testData$COST,testData$goodQSHIP,compGood2$Pred)
+colnames(plot.svm) <- c("correct","PRICE","COST","goodQSHIP","Predict")
+plot.svm.good <- ggplot(plot.svm,aes(x=PRICE,y=COST)) + geom_point(aes(size=correct,color=goodQSHIP,shape=Predict)) + ggtitle("svm - good/bad QSHIP")
+plot.svm.good
+
+#-------------------------------------------------------------------build a naive bayes model
+#Use the Function "naiveBayes"
+# build a model using naiveBayes function and use all other variables to predict
+svmGood3 <- naiveBayes(goodQSHIP~., # set "QSHIP" as target variable; "." means use all other variables to predict "QSHIP"
+                       data=trainData, # specify the data to use in the analysis
+                       kernel="rbfdot", # kernel function that projects the low dimensional problem into higher dimensional space
+                       kpar="automatic",# kpar refer to parameters that can be used to control the radial function kernel(rbfdot)
+                       C=10, # C refers to "COST of Constrains"
+                       cross=10, # use 10 fold cross validation in this model
+                       prob.model=TRUE # use probability model in this model
+)
+# check the model
+svmGood3
+
+# 2) Test the model
+goodPred3 <- predict(svmGood3, # use model "svmGood" to predict
+                     testData # use testData to do the test
+)
+# create a dataframe that contains the exact "goodQSHIP" value and the predicted "goodQSHIP"
+compGood3 <- data.frame(testData[,3], goodPred3)
+# change column names
+colnames(compGood3) <- c("test","Pred")
+# Compute the percentage of correct cases
+naiveBayes <- length(which(compGood3$test==compGood3$Pred))/dim(compGood3)[1]
+naiveBayes
+
+# Confusion Matrix
+#   
+results3 <- table(test=compGood3$test, pred=compGood3$Pred)
+print(results3)
+
+#       pred
+#  test  0  1
+#     0 21  5      #  read horizontal,, 0 class, 21 identified correctly, 5 incorrectly
+#     1  6 19      #                    1 class, 6 identified incorrectly, 19 correctly
+
+
+#plot results of svm model
+compGood3$correct <- ifelse(compGood3$test==compGood3$Pred,"correct","wrong")
+plot.naiveBayes <- data.frame(compGood3$correct,testData$QSHIP,testData$COST,testData$goodQSHIP,compGood3$Pred)
+colnames(plot.naiveBayes) <- c("correct","PRICE","COST","goodQSHIP","Predict")
+plot.nb.good <- ggplot(plot.naiveBayes,aes(x=PRICE,y=COST)) + geom_point(aes(size=correct,color=goodQSHIP,shape=Predict)) + ggtitle("naiveBayes - good/bad QSHIP")
+plot.nb.good
+
+#5. Show all three results in one window using gridArrange function
+grid.arrange(plot.ksvm.good,plot.svm.good, ncol=1, nrow=2, top="Model Comparison")
+grid.arrange(plot.ksvm.good,plot.nb.good, ncol=1, nrow=2, top="Model Comparison")
+grid.arrange(plot.svm.good,plot.nb.good, ncol=1, nrow=2, top="Model Comparison")
+```
+
+## Word Cloud - Randy
+We use word cloud analysis to analyze the frequency of keywords. Our target is to find the most frequent customer by running the analysis against STNAME. STNAME is also known as customer delivery address name.
+
+```{r}
+mlk <- readLines(file("MLK.txt"))
+mlk <- mlk[which(mlk != "")] #remove all blank lines in the text
+
+#Create a term matrix
+#interprets each element of the "mlk" as a document and create a vector source
+words.vec <- VectorSource(mlk)
+#create a Corpus, a "Bag of Words"
+words.corpus <- Corpus(words.vec)
+#first step transformation: make all of the letters in "words.corpus" lowercase
+words.corpus <- tm_map(words.corpus, content_transformer(tolower))
+#second step transformation: remove the punctuation in "words.corpus"
+words.corpus <- tm_map(words.corpus, removePunctuation)
+#third step transformation: remove numbers in "words.corpus"
+words.corpus <- tm_map(words.corpus, removeNumbers)
+#final step transformation: take out the "stop" words, such as "the", "a" and "at"
+words.corpus <- tm_map(words.corpus, removeWords, stopwords("english"))
+
+#create a term-document matrix "tdm"
+tdm <- TermDocumentMatrix(words.corpus)
+
+#Create a list of counts for each word
+#convert tdm into a matrix called "m"
+m <- as.matrix(tdm)
+
+#create a list of counts for each word named "wordCounts"
+wordCounts <- rowSums(m)
+wordCounts[1:10]
+
+#sum the total number of words and store the value to "totalWords"
+totalWords <- sum(wordCounts)
+totalWords
+#create a vector "words" that contains all the words in "wordCounts"
+words <- names(wordCounts)
+head(words)
+
+#sort words in "wordCounts" by frequency
+wordCounts <- sort(wordCounts, decreasing=TRUE)
+#check the first several items in "wordCounts" to see if it is built correctly
+head(wordCounts)
+
+#Build Word Cloud
+cloudFrame<-data.frame(word=names(wordCounts),freq=wordCounts)
+wordcloud(cloudFrame$word,cloudFrame$freq)
+```
+The most frequent keyword is “Cardlock”. Cardlock is the gas station Corey oil owns. The frequency of keyword is ___. Base on this result, we can run analysis to find out what products the client purchases at the Cardlock station.
+
+# Data Grouping - Cardlock Sales by Total Sales
+
+```{r}
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis[,c(6,7,10)]
+str(Corey_Oil_Analysis_Rank)
+
+Corey_Oil_Analysis_Rank$TotalSales <- as.numeric(as.character(Corey_Oil_Analysis_Rank$TotalSales))
+Corey_Oil_Analysis_Rank <- aggregate(Corey_Oil_Analysis_Rank$TotalSales, list(PNUM=Corey_Oil_Analysis_Rank$PNUM), sum)
+Corey_Oil_Analysis_Rank <- Corey_Oil_Analysis_Rank[order(-Corey_Oil_Analysis_Rank$x),]
+
+head.matrix(Corey_Oil_Analysis_Rank,n=30)
+Corey_Oil_Analysis_CardlockSales <- sqldf("select * from Corey_Oil_Analysis where UM = 'G' and STNAME = 'Cardlock Credit Card Customer'")
+Corey_Oil_Analysis_CardlockSales $TotalSales <- as.numeric(as.character(Corey_Oil_Analysis_CardlockSales $TotalSales))
+head(Corey_Oil_Analysis_CardlockSales )
+```
+# Histogram - Cardlock Sales by Total Sales
+
+```{r}
+Cardlock<- setNames(aggregate(Corey_Oil_Analysis_CardlockSales$QSHIP, by=list(Corey_Oil_Analysis_CardlockSales$PNUM), FUN=sum), c("PartNumber","QuantityShip"))
+Cardlock <- ggplot( data = Cardlock, aes(x=reorder (PartNumber, -QuantityShip), y=QuantityShip)) + geom_bar(stat="identity")
+Cardlock <- Cardlock + theme(axis.text.x = element_text(angle=-90, hjust=0)) +ggtitle("quantity shipped by product")
+Cardlock <- Cardlock + scale_x_discrete(name="Part Number")
+Cardlock <- Cardlock + theme(plot.title = element_text(size=20, hjust=0.5))
+Cardlock
+```
+
+## Skills Used - Anyone
+
+#packages
+ggplot2,reshape2,maps,mapdata,zipcode,sqldf,gdata,kernlab,e1071 ,gridExtra,neuralnet
+
+#Functions
+
+read.csv() - Reads a file in table format and creates a data frame from it, with cases corresponding to lines and variables to fields in the file.  
+summary() - It is a generic function used to produce result summaries of the results of various model fitting functions.  
+is.na() - It indicates which elements are missing.  
+any() - Given a set of logical vectors, is at least one of the values true?  
+na.omit() - It returns the object with incomplete cases removed.  
+gsub() - Replace the first occurrence of a pattern with sub or replace all occurrences with gsub.  
+round() - It rounds the values in its first argument to the specified number of decimal places (default 0).  
+head(), tail() - Returns the first or last parts of a vector, matrix, table, data frame or function.  
+str() - Compactly display the internal structure of an R object, a diagnostic function and an alternative to the summary  
+as.numeric() - Creates or coerces objects of type "numeric".  
+as.character() - The function returns a string of 1's and 0's or a character vector of features depending on the nature of the fingerprint supplied.  
+as.factor() - Convert a column into a factor column.  
+as.matrix() - It returns all values of a Raster* object as a matrix.  
+aggregate() - It splits the data into subsets, computes summary statistics for each, and returns the result in a convenient form.  
+list() - Functions to construct, coerce and check for both kinds of R lists.  
+lm() - lm is used to fit linear models. It can be used to carry out regression, single stratum analysis of variance and analysis of covariance.  
+merge() - Merge two data frames by common columns or row names, or do other versions of database join operations.  
+setNames() - This is a convenience function that sets the names on an object and returns the object. It is most useful at the end of a function definition where one is creating the object to be returned and would prefer not to store it under a name just so the names can be assigned.  
+colSums() - Form row and column sums and means for numeric arrays (or data frames).  
+dim() - Retrieve or set the dimension of an object.  
+Set.seed() - set.seed in the simEd package allows the user to simultaneously set the initial seed for both the stats and simEd variate generators.  
+data.frame() - The function data.frame() creates data frames, tightly coupled collections of variables which share many of the properties of matrices and of lists, used as the fundamental data structure by most of R's modeling software.  
+legend() - This function can be used to add legends to plots.  
+sqrt() - Computes the square root of the specified float value.  
+mean() - Generic function for the (trimmed) arithmetic mean.  
+rownames(), colnames() - Retrieve or set the row or column names of a matrix-like object.  
+ifelse() - It returns a value with the same shape as test which is filled with elements selected from either yes or no depending on whether the elements of the test is TRUE or FALSE.  
+length() - Get or set the length of vectors (including lists) and factors, and of any other R object for which a method has been defined.  
+table() - It uses the cross-classifying factors to build a contingency table of the counts at each combination of factor levels.  
+readLines() - Read some or all text lines from a connection.  
+rowSums() - Sum values of Raster objects by row or column.  
+sum() - It returns the sum of all the values present in its arguments.  
+names() - Functions to get or set the names of an object.  
+
+
+## Conclusion - Randy
+

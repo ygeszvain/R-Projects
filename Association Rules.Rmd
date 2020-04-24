@@ -1,0 +1,224 @@
+---
+title: "Association Rules"
+author: "Randy Geszvain"
+output: word_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+This research is to explore the bank data using association rule. The dataset contains attributes on each person's demographics and banking information to determine they will want to obtain the new PEP (Personal Equity Plan). By using the association rule, the researcher can identify what are the factors that would lead to higher chances of obtaining the new PEP. We will review how the researcher performs analysis, what the result is, and what conclusions we get from the research.
+
+# Analysis and Models
+
+## Libraries
+The researcher will use three libraries in performing the data analysis of this project. The three libraries are 1. Readr 2. Dplyr 3. Arules. Readr is used to read the CSV file of the bank data. Dplyr is a grammar of data manipulation, providing a consistent set of verbs that help the researchers solve the most common data manipulation challenges. The arules package for R provides the infrastructure for representing, manipulating and analyzing transaction data and patterns using frequent itemsets and association rules. We will utilize all three libraries to analyze the bank data and apply the association rules concept in the research.
+
+```{r}
+library(readr)
+library(dplyr)
+library(arules)
+```
+
+## Then, load the dataset
+```{r}
+bd <- read_csv("bankdata_csv_all.csv")
+str(bd)
+```
+
+## Discretization
+Discretization is the process of transferring continuous functions, models, variables, and equations into discrete counterparts. This process is usually carried out as a first step toward making them suitable for numerical evaluation and implementation on digital computers. We discretize age by customized bin and income by the equal-width bin. Based on the age ranges, we labeled the groups into children, teens, twenties, thirties, forties, fifties, old. Based on the income ranges, we categorized them into thee bins. 
+
+### Discretize age by bins
+
+```{r}
+bd$age <- cut(bd$age, breaks = c(0,10,20,30,40,50,60,Inf),labels=c("child","teens","twenties","thirties","fourties","fifties","old"))
+```
+
+### Discretize income by equal-width bin
+
+```{r}
+min_income <- min(bd$income)
+max_income <- max(bd$income)
+bins = 3 
+width=(max_income - min_income)/bins;
+bd$income = cut(bd$income, breaks=seq(min_income, max_income, width))
+```
+
+### Numeric to Nominal
+We converted children's data from numeric to nominal. In statistics, nominal data (also known as nominal scale) is a type of data that is used to label variables without providing any quantitative value. In this case, the children (1, 2, 3, 4…) served as nominal data. It has more category value than a numeric value.
+
+
+```{r}
+bd$children=factor(bd$children)
+```
+
+## Data Conversion and Preprocess Data
+In this step, for arules package to find the data pattern and apply association rules on the data, we converted "Yes" to "[variable_name]=YES”. Also, we applied a function to convert categorical data to factor and discretize numeric variables. 
+
+```{r}
+bd$married=dplyr::recode(bd$married, YES="married=YES", NO="married=NO")
+bd$car=dplyr::recode(bd$car, YES="car=YES", NO="car=NO")
+bd$save_act=dplyr::recode(bd$save_act, YES="save_act=YES", NO="save_act=NO")
+bd$current_act=dplyr::recode(bd$current_act, YES="current_act=YES", NO="current_act=NO")
+bd$mortgage=dplyr::recode(bd$mortgage, YES="mortgage=YES", NO="mortgage=NO")
+bd$pep=dplyr::recode(bd$pep, YES="pep=YES", NO="pep=NO")
+```
+
+### Preprocess the data
+
+```{r}
+# drop the id variable
+# convert categorical variables to factor
+# discretize numeric variables
+bd <- bd %>% 
+  select(-id) %>% 
+  mutate_if(is.character, funs(as.factor)) %>% 
+  mutate_if(is.numeric, funs(discretize))
+```
+
+## Generate rules and explore
+In this step, we used the apriori package to generate rules. The apriori() generates the most relevant set of rules from a given transaction data. It also shows 
+
+```{r}
+# generate rules
+myRules <- apriori(bd, parameter = list(supp = 0.001, conf = 0.9, maxlen = 4))
+```
+
+## Show the top 5 rules
+
+```{r}
+inspect(myRules[1:5])
+```
+
+## Summary of rules
+
+```{r}
+summary(myRules)
+```
+
+## Sorting stuff out
+Below is a preview of the rules. We present the rules sorted by three measures (support, confidence, and lift). By reviewing all three measures, we can find interesting rules and target those rules for further analysis 
+
+sort top 30 rules by support
+
+```{r}
+myRules<-sort(myRules, by="support", decreasing=TRUE)
+inspect(myRules[1:30])
+```
+
+sort top 30 rules by confidence
+
+```{r}
+myRules<-sort(myRules, by="confidence", decreasing=TRUE)
+inspect(myRules[1:30])
+```
+
+sort top 30 rules by lift
+
+```{r}
+myRules<-sort(myRules, by="lift", decreasing=TRUE)
+inspect(myRules[1:30])
+```
+
+## Redundancies
+A rule is redundant if a more general rule with the same or higher confidence exists. That is, a more specific rule is redundant if it is only equally or even less predictive than a more general rule. A rule is more general if it has the same RHS but one or more items removed from the LHS. In this step, we remove those redundancies and prune the results.
+
+
+```{r}
+subset.matrix <- is.subset(myRules, myRules)
+subset.matrix[lower.tri(subset.matrix, diag=T)] <- NA
+redundant <- colSums(subset.matrix, na.rm=T) >= 1
+myRules.pruned <- myRules[!redundant]
+myRules<-myRules.pruned
+```
+
+## Targeting Items
+In this step, we are going to target at five interesting rules by specifying parameters.
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: region=SUBURBAN
+
+```{r}
+myRules<-apriori(data=bd, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="region=SUBURBAN"),
+               control = list(verbose=F))
+myRules<-sort(myRules, decreasing=TRUE,by="confidence")
+inspect(myRules[1:5])
+```
+
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: children=3
+
+```{r}
+myRules<-apriori(data=bd, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="children=3"),
+               control = list(verbose=F))
+myRules<-sort(myRules, decreasing=TRUE,by="confidence")
+inspect(myRules[1:5])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: children=2
+
+```{r}
+myRules<-apriori(data=bd, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="children=2"),
+               control = list(verbose=F))
+myRules<-sort(myRules, decreasing=TRUE,by="confidence")
+inspect(myRules[1:5])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: save_act=save_act=YES
+
+```{r}
+myRules<-apriori(data=bd, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="save_act=save_act=YES"),
+               control = list(verbose=F))
+myRules<-sort(myRules, decreasing=TRUE,by="confidence")
+inspect(myRules[1:5])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: pep=pep=YES
+
+```{r}
+myRules<-apriori(data=bd, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="pep=pep=YES"),
+               control = list(verbose=F))
+myRules<-sort(myRules, decreasing=TRUE,by="confidence")
+inspect(myRules[1:5])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: pep=pep=NO
+
+```{r}
+myRules<-apriori(data=bd, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="pep=pep=NO"),
+               control = list(verbose=F))
+myRules<-sort(myRules, decreasing=TRUE,by="confidence")
+inspect(myRules[1:5])
+```
+
+# Conclusions
+
+With the association rule, we can help the bank understand its customers and demographics. When running the association rules, we can use different arguments to find the rule that best interests us. We can also focus on a product line and research why they own a specific product or not. What could potentially be the reason? With that said, the analysis was able to locate the demographic info for those who own PEP and those who don’t. The bank can further analyze and develop several PEP products for them.
+
