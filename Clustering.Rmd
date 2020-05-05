@@ -1,0 +1,364 @@
+---
+title: "Clustering"
+author: "Randy Geszvain"
+output: word_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Introduction
+This research aims to discuss who wrote the disputed essays in the federalist papers. Could it be Hamilton or Madison? The Federalist Papers were a series of eighty-five essays urging the citizens of New York to ratify the new United States Constitution. Written by Alexander Hamilton, James Madison, and John Jay, the essays originally appeared anonymously in New York newspapers in 1787 and 1788 under the pen name "Publius." Abound edition of the essays was first published in 1788, but it was not until the 1818 edition published by the printer Jacob Gideon that the authors of each essay were identified by name. The Federalist Papers are considered one of the most important sources for interpreting and understanding the original intent of the Constitution.
+
+From 74 essays, the identified authors are 51 essays written by Hamilton, 15 by Madison, 3 by Hamilton, and Madison, 5 by Jay. The remaining 11 essays, however, are authored by “Hamilton or Madison”. The essays authored by Hamilton or Madison are shown appendix A. The numbers of the essays are 49, 50, 51, 52, 53, 54, 55, 56, 57, 62, and 63. This research will analyze the data set and use cluster algorithms including k-Means, EM, and HAC to conclude who wrote the disputed essays.
+
+# Analysis and Models
+The researcher will present the process of analyzing the federalist paper data set in this section. 
+
+## Loading Libraries
+We will use many libraries to assist with our analysis. The packages include natural language processing, clustering, matrix, visualization, etc. The packages used are crucial to complete the analysis and gain insights.
+
+```{r}
+library(tm)
+library(slam) 
+library(quanteda)
+library(SnowballC) 
+library(arules)
+library(proxy)
+library(cluster) 
+library(stringi) 
+library(Matrix) 
+library(tidytext) 
+library(plyr) 
+library(ggplot2)
+library(factoextra)
+library(mclust)
+library(dplyr)
+library(wordcloud)
+library(factoextra)
+```
+
+## Loading Data
+In linguistics, a corpus or text corpus is a large and structured set of texts. In corpus linguistics, they are used to do statistical analysis and hypothesis testing, checking occurrences or validating linguistic rules within a specific language territory. The researcher was provided with a corpus for the analysis.
+
+```{r}
+ ###Load Fed Papers Corpus
+FedPapersCorpus <- Corpus(DirSource("FedPapersCorpus")) 
+```
+
+```{r}
+numberFedPapers <- length(FedPapersCorpus)
+numberFedPapers
+```
+
+```{r}
+##The following will show you that you read in all the documents
+(summary(FedPapersCorpus))
+```
+
+```{r}
+#(meta(FedPapersCorpus[[1]]))
+```
+# Data Cleaning
+In this section, we are going to do data cleaning. The data cleaning steps include 1. Removing punctuation, numbers, and space 2. Ignore extremely rare words. We used one percent as the benchmark. The words that appeared less than one percent are removed. 3. Ignore commonly used words. We used fifty percent as the benchmark. The words that appeared more than fifty percent are removed. 4. Exclude stop words - stop words are words that are filtered out before or after processing of natural language data. The cleaning steps executed will provide a better picture by removing bias.
+
+```{r}
+##Data Preparation and Transformation on Fed Papers
+###Remove punctuation,numbers, and space 
+(getTransformations())
+```
+
+```{r}
+(nFedPapersCorpus<-length(FedPapersCorpus))
+```
+
+```{r}
+### ignore extremely rare words i.e. terms that appear in less then 1% of the documents
+(minTermFreq <- nFedPapersCorpus * 0.0001)
+```
+
+```{r}
+###Ignore overly common words i.e. terms that appear in more than 50% of the documents
+(maxTermFreq <- nFedPapersCorpus * 1)
+```
+
+```{r}
+(MyStopwords <- c("will","one","two", "may","less", "well","might","withou","small", "single", "several", "but", "very", "can", "must", "also", "any", "and", "are", "however", "into", "almost", "can","for", "add" ))
+```
+
+```{r}
+#stopwords
+(STOPS <-stopwords('english'))
+```
+
+```{r}
+Papers_DTM <- DocumentTermMatrix(FedPapersCorpus,
+                         control = list(
+                           stopwords = TRUE, 
+                           wordLengths=c(3, 15),
+                           removePunctuation = T,
+                           removeNumbers = T,
+                           tolower=T,
+                           stemming = T,
+                           remove_separators = T,
+                           stopwords = MyStopwords,
+                           bounds = list(global = c(minTermFreq,maxTermFreq))))
+
+#inspect FedPapers Document Term Matrix (DTM)
+DTM <- as.matrix(Papers_DTM)
+(DTM[1:11,1:10])
+```
+
+## Initial Cleaning Results
+This section presents the results of data cleaning. There are 4900 words. The word frequencies are stored in WordFreq vector. The row rums per Fed paper present the collective result of word frequencies in each file.
+
+```{r}
+## Look at word freuquncies
+WordFreq <- colSums(as.matrix(Papers_DTM))
+(head(WordFreq))
+```
+
+```{r}
+(length(WordFreq))
+```
+
+```{r}
+ord <- order(WordFreq)
+(WordFreq[head(ord)])
+```
+
+```{r}
+(WordFreq[tail(ord)])
+```
+
+```{r}
+## Row Sums per Fed Papers
+(Row_Sum_Per_doc <- rowSums((as.matrix(Papers_DTM))))
+```
+
+## Normalization
+Vectors are normalized to unit length before they are used for similarity calculation, making cosine similarity and dot-product equivalent.
+
+```{r}
+## Create a normalized version of Papers_DTM
+Papers_M <- as.matrix(Papers_DTM)
+Papers_M_N1 <- apply(Papers_M, 1, function(i) round(i/sum(i),3))
+Papers_Matrix_Norm <- t(Papers_M_N1)
+## Have a look at the original and the norm to make sure
+(Papers_M[c(1:11),c(1000:1010)])
+```
+
+```{r}
+(Papers_Matrix_Norm[c(1:11),c(1000:1010)])
+```
+
+## Data Structures
+We can quickly review the data structures of the data.
+
+```{r}
+## Convert to matrix and view
+Papers_dtm_matrix = as.matrix(Papers_DTM)
+str(Papers_dtm_matrix)
+```
+
+```{r}
+(Papers_dtm_matrix[c(1:11),c(2:10)])
+```
+
+## Converting to Data Frame
+We convert the vector to a data frame to further analysis.
+
+```{r}
+Papers_DF <- as.data.frame(as.matrix(Papers_DTM))
+str(Papers_DF)
+```
+
+```{r}
+(Papers_DF$abolit)
+```
+
+```{r}
+(nrow(Papers_DF))  ## Each row is Paper
+```
+
+## Word Cloud
+A word cloud is a novelty visual representation of text data, typically used to depict keyword metadata on websites or to visualize free form text. By reviewing the word cloud, the researcher can quickly identify the words that were used with higher frequencies.
+
+Below word cloud graph is a collective result from the entire corpus. The words that were frequently used are people (not shown in the graph but in the matrix), senat, will, may…, etc. 
+
+```{r}
+#Wordcloud Visualization Hamilton, Madison and Disputed Papers
+DisputedPapersWC<- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[11, ])
+```
+
+```{r}
+(head(sort(as.matrix(Papers_DTM)[11,], decreasing = TRUE), n=50))
+```
+
+The below graph is a result of the essay text file noted with Hamilton as the author. We can see the most frequently used words are passiv, uncommerci, etc.
+
+```{r}
+HamiltonPapersWC <- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[12:62, ])
+```
+
+The below graph is a result of the essay text file noted with Madison as the author. We can see the most frequently used words are unimport, contract, cogent, etc.
+
+```{r}
+MadisonPapersHW <- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[63:77, ])
+```
+
+## Distance Metrics
+A good distance metric helps in improving the performance of Classification, Clustering and, Information Retrieval process significantly. Below shows the researcher used three methods (Euclidean, Manhattan, and cosine) to perform distance metrics analysis. We can also conclude that cosine similarity works the best because the height in the cluster dendrogram is much smaller. In other words, the distance between those clusters was smaller. Normalized data and not normalized data are about the same because the size of the Papers are not significantly different.
+
+```{r}
+###Distance Measure
+m <- Papers_dtm_matrix
+m_norm <- Papers_Matrix_Norm
+distMatrix_E <- dist(m, method="euclidean")
+distMatrix_E
+fit <- hclust(distMatrix_E, method="ward.D2")
+plot(fit)
+```
+
+```{r}
+###Distance Measure
+distMatrix_M <- dist(m, method="manhattan")
+distMatrix_M
+fit <- hclust(distMatrix_M, method="ward.D2")
+plot(fit)
+```
+
+```{r}
+###Distance Measure
+distMatrix_C <- dist(m, method="cosine")
+distMatrix_C
+fit <- hclust(distMatrix_C, method="ward.D2")
+plot(fit)
+```
+
+```{r}
+###Distance Measure
+distMatrix_C_norm <- dist(m_norm, method="cosine")
+distMatrix_C_norm
+fit <- hclust(distMatrix_C_norm, method="ward.D2")
+plot(fit)
+```
+
+## Clustering
+### HAC
+Hierarchical agglomerative clustering or HAC is a bottom-up hierarchical clustering. This hierarchy of clusters is represented as a tree (or dendrogram). The root of the tree is the unique cluster that gathers all the samples, the leaves being the clusters with only one sample. Below shown the HAC cluster dendrogram with three different methods – Euclidean similarity, Cosine Similarity, and Cosine Similarity Normalized.
+
+By reviewing the graph, we can identify how the disputed items are closer to Hamilton or Madison. When they are closer, there are higher chances that the essays are from the same author. Since we determined the cosine similarity has a better result in the distance metric, we will focus on the HAC Cluster Dendrogram with Cosine Similarity graph and HAC Cluster Dendrogram with Cosine Similarity Normalized graph.
+
+
+```{r}
+###Clustering Methods:
+## HAC: Hierarchical Algorithm Clustering Method
+## Euclidean
+groups_E <- hclust(distMatrix_E,method="ward.D")
+plot(groups_E, cex=0.5, font=22, hang=-1, main = "HAC Cluster Dendrogram with Euclidean Similarity")
+rect.hclust(groups_E, k=2)
+```
+
+```{r}
+## Cosine Similarity
+groups_C <- hclust(distMatrix_C,method="ward.D")
+plot(groups_C, cex=0.5,font=22, hang=-1,main = "HAC Cluster Dendrogram with Cosine Similarity")
+rect.hclust(groups_C, k=2)
+```
+
+```{r}
+## Cosine Similarity for Normalized Matrix
+groups_C_n <- hclust(distMatrix_C_norm,method="ward.D")
+plot(groups_C_n, cex=0.5, font=22, hang=-1,  main = "HAC Cluster Dendrogram with Cosine Similarity Normalized Matrix")
+rect.hclust(groups_C_n, k=2)
+```
+From the chart, we can see below close relationship among disputed items and other items.
+
+### K-mean Clustering
+
+Below presents the result of K-mean clustering with four clusters. The stats are listed. However, the result is not easy to interpret.
+
+
+```{r}
+## k means clustering Methods
+X <- m_norm
+k2 <- kmeans(X, centers = 4, nstart = 100, iter.max = 50)
+str(k2)
+```
+
+Below presents the correlation among objects using K-mean clustering. However, due to the high number of objects, it’s still not easy to interpret.
+
+```{r}
+## k means visualization results!
+distance1 <- get_dist(X,method = "manhattan")
+fviz_dist(distance1, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
+```{r}
+distance2 <- get_dist(X,method = "euclidean")
+fviz_dist(distance2, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
+```{r}
+distance3 <- get_dist(X,method = "spearman")
+fviz_dist(distance3, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07", title= "Distance Matrix Visualization, Spearman Method"))
+```
+
+Below presents four graphs with a different number of clusters ranging from two to four. The graph and result are better to interpret when the centroids are separable.
+
+```{r}
+## Now scale the data
+X <- scale(X)
+str(X)
+## k means
+kmeansFIT_1 <- kmeans(X,centers=2)
+#(kmeansFIT1)
+summary(kmeansFIT_1)
+#(kmeansFIT_1$cluster)
+fviz_cluster(kmeansFIT_1, data = X)
+```
+
+```{r}
+## Now scale the data
+X <- scale(X)
+str(X)
+## k means
+kmeansFIT_2 <- kmeans(X,centers=3)
+#(kmeansFIT1)
+summary(kmeansFIT_2)
+#(kmeansFIT_1$cluster)
+fviz_cluster(kmeansFIT_2, data = X)
+```
+
+```{r}
+## Now scale the data
+X <- scale(X)
+str(X)
+## k means
+kmeansFIT_3 <- kmeans(X,centers=4)
+#(kmeansFIT1)
+summary(kmeansFIT_3)
+#(kmeansFIT_1$cluster)
+fviz_cluster(kmeansFIT_3, data = X)
+```
+
+```{r}
+## Now scale the data
+X <- scale(X)
+str(X)
+## k means
+kmeansFIT_4 <- kmeans(X,centers=5)
+#(kmeansFIT1)
+summary(kmeansFIT_4)
+#(kmeansFIT_1$cluster)
+fviz_cluster(kmeansFIT_4, data = X)
+```
+
+```{r}
+#ClusFI <- Mclust(X,G=6)
+#(ClusFI)
+#summary(ClusFI)
+#plot(ClusFI, what = "classification")
+```
