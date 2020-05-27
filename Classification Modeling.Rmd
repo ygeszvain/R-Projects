@@ -1,0 +1,728 @@
+---
+title: "Classification Modeling"
+label: "Randy Geszvain"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+This research aims to perform classification algorithms on a dataset which contains handwriting images. The dataset is from a Kaggle competition – Digit Recognizer Competition. Kaggle, a subsidiary of Google LLC, is an online community of data scientists and machine learning practitioners. Kaggle allows users to find and publish data sets, explore and build models in a web-based data-science environment, work with other data scientists and machine learning engineers, and enter competitions to solve data science challenges.
+
+The handwriting images dataset is from MNIST ("Modified National Institute of Standards and Technology"). Since its release in 1999, this classic dataset of handwritten images has served as the basis for benchmarking classification algorithms. As new machine learning techniques emerge, MNIST remains a reliable resource for researchers and learners alike. The goal is to correctly identify digits from a dataset of tens of thousands of handwritten images using classification algorithms such as decision tree, naïve Bayes, SVM, kNN, and Random Forest algorithms. The researcher will review the result of the classification for each algorithm and compare the results.
+
+# Analysis and Models
+## First, load the libraries
+```{r}
+library(sqldf)
+library(ggplot2)
+library(class)
+library(e1071)
+library(randomForest)
+library(readr)
+library(dplyr)
+library(RSNNS)
+library(tidyr)
+library(gridExtra)
+library(randomForest)
+library(readr)
+library(RColorBrewer)
+library(foreign)  # For reading and writing data stored by statistical packages such as Minitab,S,SAS,SPSS
+library(tree)
+library(maptree)
+library(rpart)  # Recursive Partitioning and Regression Trees (RPart)
+library(RWeka)  # Weka
+library(FNN)  # Fast k-Nearest Neighbors (kNN)
+library(e1071)  # Support Vector Machine (SVM)
+library(tidyverse) # metapackage with lots of helpful functions
+library(rpart) #Decision Tree
+library(gbm) #Gradient Boosting
+library(rpart.plot) #Model Visualization
+library(factoextra)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(factoextra)
+library(FNN)
+library(caret)
+library(randomForest)
+library(data.table)
+library(caTools)
+library(caret)
+library(randomForest)
+```
+
+## Load Data
+Load the data from the Kaggle digits data set. There is a train and test data set. For this example, I only use the train data set but run crossvalidation. Also note: this data set is large and so I reduce it by “percent” – see below.
+
+```{r}
+#First load the training data in csv format, and then convert "label" to nominal variable.
+filename <-"digit_train.csv"
+trainset <- read.csv(filename, header = TRUE, stringsAsFactors = TRUE)
+trainset$label<-as.factor(trainset$label)
+dim(trainset)
+```
+
+```{r}
+head(trainset)
+```
+
+```{r}
+#Create a random sample of n% of train data set
+percent <- .25
+set.seed(275)
+DigitSplit <- sample(nrow(trainset),nrow(trainset)*percent)
+DigitDF <- trainset[DigitSplit,]
+dim(DigitDF)
+```
+
+```{r}
+(head(DigitDF))
+#(str(DigitDF))
+(nrow(DigitDF))
+```
+Don’t use the test data set in this example, but I encourage you to try and see what happens.
+```{r}
+filename <-"digit_test.csv"
+testset <- read.csv(filename, header = TRUE, stringsAsFactors = TRUE)
+#testset$label<-as.factor(testset$label)
+# Wont use test data, instead crossvalidation on train.
+dim(testset)
+```
+
+```{r}
+(head(testset))
+```
+## EDA
+```{r}
+sum(is.na(trainset))
+sum(is.na(testset))
+levels(trainset[, 1])
+```
+
+```{r}
+digit <- matrix(as.numeric(trainset[8,-1]), nrow = 28) #look at one digit
+image(digit, col = grey.colors(255))
+```
+
+```{r}
+flip <- function(matrix){
+  apply(matrix, 2, rev)
+}
+
+par(mfrow=c(3,3))
+for (i in 1:27){
+  dit <- flip(matrix(rev(as.numeric(trainset[i,-c(1, 786)])), nrow = 28)) #look at one digit
+  image(dit, col = grey.colors(255))
+}
+```
+
+```{r}
+trainset$intensity <- apply(trainset[,-1], 1, mean) #takes the mean of each row in train
+
+intbylabel <- aggregate (trainset$intensity, by = list(trainset$label), FUN = mean)
+
+plot <- ggplot(data=intbylabel, aes(x=Group.1, y = x)) +
+  geom_bar(stat="identity")
+plot + scale_x_discrete(limits=0:9) + xlab("digit label") + 
+  ylab("average intensity")
+```
+
+```{r}
+p1 <- qplot(subset(trainset, label ==1)$intensity, binwidth = .75, 
+            xlab = "Intensity Histogram for 1")
+
+p2 <- qplot(subset(trainset, label ==4)$intensity, binwidth = .75,
+            xlab = "Intensity Histogram for 4")
+
+p3 <- qplot(subset(trainset, label ==7)$intensity, binwidth = .75,
+            xlab = "Intensity Histogram for 7")
+
+p4 <- qplot(subset(trainset, label ==9)$intensity, binwidth = .75,
+            xlab = "Intensity Histogram for 9")
+
+grid.arrange(p1, p2, p3,p4, ncol = 2)
+```
+
+```{r}
+train4 <- trainset[trainset$label == 4, ]
+train7 <- trainset[trainset$label == 7, ]
+
+flip <- function(matrix){
+  apply(matrix, 2, rev)
+}
+
+par(mfrow=c(3,3))
+for (i in 20:28){
+  digit <- flip(matrix(rev(as.numeric(train4[i,-c(1, 786)])), nrow = 28)) #look at one digit
+  image(digit, col = grey.colors(255))
+}
+```
+
+```{r}
+par(mfrow=c(3,3))
+for (i in 10:18){
+  digit <- flip(matrix(rev(as.numeric(train7[i,-c(1, 786)])), nrow = 28)) #look at one digit
+  image(digit, col = grey.colors(255))
+}
+```
+
+```{r}
+par(mfrow = c(1,1))
+pixels <- trainset[,-c(1, 786)]/255
+
+symmetry <-  function(vect) {
+  matrix <- flip(matrix(rev(unlist(vect))))
+  flipped <- flip(matrix)
+  diff <- flipped - matrix
+  return(sum(diff*diff))
+}
+
+symmetry((pixels[1,]))
+```
+
+```{r}
+sym <- (apply(X = pixels, MARGIN = 1, FUN = symmetry))
+
+means <- numeric(10)
+for (i in 0:9){
+  means[i+1] <- mean(sym[trainset$label == i])
+}
+
+means <- (means/intbylabel[,2])**(-1)
+
+mean <- data.frame( label = 0:9,symmetry = means)
+
+plot <- ggplot(data=mean, aes(x= label, y = symmetry)) +
+  geom_bar(stat="identity")
+plot + scale_x_discrete(limits=0:9) + xlab("digit label") + 
+  ylab("symmetry")
+```
+
+## Models - Decision Tree, Naïve Bayes, kNN, SVM, and Random Forest
+### Data preprocessing.
+Reload the data
+```{r}
+trainset <- read.csv("digit_train.csv")
+trainset$label <- factor(trainset$label)
+testset <- read.csv("digit_test.csv")
+
+dim(trainset)
+dim(testset)
+```
+
+```{r}
+#Create a random sample of n% of train data set
+percent <- .15
+dimReduce <- .10
+set.seed(275)
+DigitSplit <- sample(nrow(trainset),nrow(trainset)*percent)
+
+trainset <- trainset[DigitSplit,]
+dim(trainset)
+```
+
+```{r}
+# Setting static variables used throughout the Models section
+N <- nrow(trainset)
+kfolds <- 2
+set.seed(30)
+holdout <- split(sample(1:N), 1:kfolds)
+
+# Function for model evaluation
+get_accuracy_rate <- function(results_table, total_cases) {
+    diagonal_sum <- sum(c(results_table[[1]], results_table[[12]], results_table[[23]], results_table[[34]],
+                        results_table[[45]], results_table[[56]], results_table[[67]], results_table[[78]],
+                        results_table[[89]], results_table[[100]]))
+  (diagonal_sum / total_cases)*100
+}
+```
+
+In this example, we binarize the data.
+
+```{r}
+# Discretizing at 87%
+binarized_trainset <- trainset
+for (col in colnames(binarized_trainset)) {
+  if (col != "label") {
+    binarized_trainset[, c(col)] <- ifelse(binarized_trainset[, c(col)] > 131, 1, 0)
+  }
+}
+for (col in colnames(binarized_trainset)) {
+  if (col != "label") {
+    binarized_trainset[, c(col)] <- as.factor(binarized_trainset[, c(col)])
+  }
+}
+```
+
+This version of the MNIST data set is made of 1,400 individual observations. Each observation is characterized by 785 columns 784 of which are the gray scale values (from 0 to 255) of each pixel of each number in the whole data set. The 784 pixels together form a 28 x 28 square grid which make up the drawing of that particular number. The final column not yet discussed is the label which is the actual digit 0 to 9.
+
+Below are two bar charts displaying the distribution of each of the written digits and the spread of gray scale values:
+
+```{r}
+digit_freq <- sqldf("SELECT label, COUNT(label) as count
+                     FROM trainset
+                     GROUP BY label")
+ggplot(digit_freq, aes(x=reorder(label, -count), y=count)) + geom_bar(stat="identity") + xlab("Written Digit") + ylab("Frequency Count") + ggtitle("Written Digit by Frequency Count")
+```
+
+```{r}
+zero <- 0
+fifty <- 0
+one_hundred <- 0
+one_hundred_fifty <- 0
+two_hundred <- 0
+two_hundred_fifty_five <- 0
+for (col in colnames(trainset)) {
+  if (col != "label") {
+    #binarized_trainset[,c(col)] <- ifelse(binarized_trainset[,c(col)] > 131, 1, 0)
+    ifelse(trainset[,c(col)] == 0, zero <- zero + 1, ifelse(
+      trainset[,c(col)] < 51, fifty <- fifty + 1, ifelse(
+        trainset[,c(col)] < 101, one_hundred <- one_hundred + 1, ifelse(
+          trainset[,c(col)] < 151, one_hundred_fifty <- one_hundred_fifty + 1, ifelse(
+            trainset[,c(col)] < 201, two_hundred <- two_hundred + 1, two_hundred_fifty_five + 1
+          )
+        )
+      )
+    )
+  )
+  }
+}
+
+color_bins <- data.frame("color_bin"=c("0", "50", "100", "150", "200", "255"),
+                         "count"=c(zero, fifty, one_hundred, one_hundred_fifty, two_hundred, two_hundred_fifty_five))
+ggplot(color_bins, aes(x=reorder(color_bin, -count), y=count)) + geom_bar(stat="identity") + xlab("Color Bin") + ylab("Frequency Count") + ggtitle("Color Bin by Frequency Count")
+```
+
+Finally, below is another bar chart showing the distribution of final color values in the binarized data:
+
+```{r}
+color_freq <- data.frame("0"=c(), "1"=c())
+for (col in colnames(binarized_trainset)) {
+  if (col != "label") {
+    zero <- c(length(which(binarized_trainset[,c(col)] == 0)))
+    one <- c(length(which(binarized_trainset[,c(col)] == 1)))
+    color_freq <- rbind(color_freq, data.frame("0"=zero, "1"=one))
+  }
+}
+colnames(color_freq) <- c("zero", "one")
+color_freq <- data.frame("number"=c("zero", "one"), "count"=c(sum(color_freq$zero), sum(color_freq$one)))
+
+ggplot(color_freq, aes(x=number, y=count)) + geom_bar(stat="identity") + xlab("Color Number") + ylab("Count") + ggtitle("Color Number by Count")
+```
+
+### Decision Tree
+
+80/20
+
+```{r}
+formula = label ~ .
+set.seed(1256)
+train <- sample(1:nrow(trainset),size = ceiling(0.80*nrow(trainset)),replace = FALSE)
+tree_train <- trainset[train,]
+tree_test <- trainset[-train,]
+tree = rpart(formula = formula, data = tree_train, method = "class")
+#summary(tree)
+```
+
+```{r}
+rpart.plot(tree)
+```
+
+```{r}
+barplot(tree$variable.importance)
+```
+
+```{r}
+predicted= predict(tree, tree_test, type="class")
+rsq.rpart(tree)
+```
+
+```{r}
+plotcp(tree)
+```
+
+```{r}
+fancyRpartPlot(tree)
+```
+
+```{r}
+confMat <- table(tree_test$label,predicted)
+confusionMatrix(confMat)
+```
+
+70/30
+
+```{r}
+formula = label ~ .
+set.seed(1256)
+train <- sample(1:nrow(trainset),size = ceiling(0.70*nrow(trainset)),replace = FALSE)
+tree_train <- trainset[train,]
+tree_test <- trainset[-train,]
+tree = rpart(formula = formula, data = tree_train, method = "class")
+#summary(tree)
+```
+
+```{r}
+rpart.plot(tree)
+```
+
+```{r}
+barplot(tree$variable.importance)
+```
+
+```{r}
+predicted= predict(tree, tree_test, type="class")
+rsq.rpart(tree)
+```
+
+```{r}
+plotcp(tree)
+```
+
+```{r}
+fancyRpartPlot(tree)
+```
+
+```{r}
+confMat <- table(tree_test$label,predicted)
+confusionMatrix(confMat)
+```
+
+60/40
+
+```{r}
+formula = label ~ .
+set.seed(1256)
+train <- sample(1:nrow(trainset),size = ceiling(0.60*nrow(trainset)),replace = FALSE)
+tree_train <- trainset[train,]
+tree_test <- trainset[-train,]
+tree = rpart(formula = formula, data = tree_train, method = "class")
+#summary(tree)
+```
+
+```{r}
+rpart.plot(tree)
+```
+
+```{r}
+barplot(tree$variable.importance)
+```
+
+```{r}
+predicted= predict(tree, tree_test, type="class")
+rsq.rpart(tree)
+```
+
+```{r}
+plotcp(tree)
+```
+
+```{r}
+fancyRpartPlot(tree)
+```
+
+```{r}
+confMat <- table(tree_test$label,predicted)
+confusionMatrix(confMat)
+```
+
+### Naïve Bayes
+```{r}
+#Run training and Testing for each of the k-folds
+AllResults<-list()
+AllLabels<-list()
+for (k in 1:kfolds){
+  
+  DigitDF_Test <- trainset[holdout[[k]], ]
+  DigitDF_Train=trainset[-holdout[[k]], ]
+  ## View the created Test and Train sets
+  (head(DigitDF_Train))
+  (table(DigitDF_Test$Label))
+  ## Make sure you take the labels out of the testing data
+  (head(DigitDF_Test))
+  DigitDF_Test_noLabel<-DigitDF_Test[-c(1)]
+  DigitDF_Test_justLabel<-DigitDF_Test$label
+  (head(DigitDF_Test_noLabel))
+  
+  #### Naive Bayes prediction ussing e1071 package
+  #Naive Bayes Train model
+  train_naibayes<-naiveBayes(label~., data=DigitDF_Train, na.action = na.pass)
+  train_naibayes
+  #summary(train_naibayes)
+  
+  #Naive Bayes model Prediction 
+  nb_Pred <- predict(train_naibayes, DigitDF_Test_noLabel)
+  nb_Pred
+  
+  
+  #Testing accurancy of naive bayes model with Kaggle train data sub set
+  (confusionMatrix(nb_Pred, DigitDF_Test$label))
+  
+  # Accumulate results from each fold, if you like
+  AllResults<- c(AllResults,nb_Pred)
+  AllLabels<- c(AllLabels, DigitDF_Test_justLabel)
+}
+### end crossvalidation -- present results for all folds  
+table(unlist(AllResults),unlist(AllLabels))
+plot(nb_Pred, ylab = "Density", main = "Naive Bayes Plot")
+```
+
+```{r}
+get_accuracy_rate(table(unlist(AllResults),unlist(AllLabels)), length(AllLabels))
+```
+
+### kNN
+The first algorithm will be kNN. This model requires a k value which is arbitrarily chosen. The first k value will just be the rounded square root of the number of rows in the training data set: 37.
+
+```{r}
+ k_guess = 3
+ all_results <- data.frame(orig=c(), pred=c())
+ for (k in 1:kfolds) {
+   new_test <- trainset[holdout[[k]], ]
+   new_train <- trainset[-holdout[[k]], ]
+
+   new_test_no_label <- new_test[-c(1)]
+   new_test_just_label <- new_test[c(1)]
+
+   pred <- knn(train=new_train[-1], test=new_test[-1], cl=new_train$label, k=k_guess, prob=FALSE)
+
+   all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+ }
+ table(all_results$orig, all_results$pred)
+ 
+ get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+
+```{r}
+ k_guess = 5
+ all_results <- data.frame(orig=c(), pred=c())
+ for (k in 1:kfolds) {
+   new_test <- trainset[holdout[[k]], ]
+   new_train <- trainset[-holdout[[k]], ]
+
+   new_test_no_label <- new_test[-c(1)]
+   new_test_just_label <- new_test[c(1)]
+
+   pred <- knn(train=new_train[-1], test=new_test[-1], cl=new_train$label, k=k_guess, prob=FALSE)
+
+   all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+ }
+ table(all_results$orig, all_results$pred)
+ 
+ get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+
+```{r}
+ k_guess = 7
+ all_results <- data.frame(orig=c(), pred=c())
+ for (k in 1:kfolds) {
+   new_test <- trainset[holdout[[k]], ]
+   new_train <- trainset[-holdout[[k]], ]
+
+   new_test_no_label <- new_test[-c(1)]
+   new_test_just_label <- new_test[c(1)]
+
+   pred <- knn(train=new_train[-1], test=new_test[-1], cl=new_train$label, k=k_guess, prob=FALSE)
+
+   all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+ }
+ table(all_results$orig, all_results$pred)
+ 
+ get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+
+```{r}
+ k_guess = 8
+ all_results <- data.frame(orig=c(), pred=c())
+ for (k in 1:kfolds) {
+   new_test <- trainset[holdout[[k]], ]
+   new_train <- trainset[-holdout[[k]], ]
+
+   new_test_no_label <- new_test[-c(1)]
+   new_test_just_label <- new_test[c(1)]
+
+   pred <- knn(train=new_train[-1], test=new_test[-1], cl=new_train$label, k=k_guess, prob=FALSE)
+
+   all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+ }
+ table(all_results$orig, all_results$pred)
+ 
+ get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+
+### SVM
+Next try the SVMs. Remember to experiment with different cost values and different kernels. See some examples below.
+
+```{r}
+cols_to_remove = c()
+for (col in colnames(trainset)) { if (col != "label") {
+  if (length(unique(trainset[, c(col)])) == 1) {
+    cols_to_remove <- c(cols_to_remove, col)
+  } }
+}
+svm_trainset <- trainset[-which(colnames(trainset) %in% cols_to_remove)]
+```
+
+```{r}
+all_results <- data.frame(orig=c(), pred=c()) 
+for (k in 1:kfolds) {
+  new_test <- svm_trainset[holdout[[k]], ]
+  new_train <- svm_trainset[-holdout[[k]], ]
+  new_test_no_label <- new_test[-c(1)] 
+  new_test_just_label <- new_test[c(1)]
+  test_model <- svm(label ~ ., new_train, na.action=na.pass)
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred)) }
+table(all_results$orig, all_results$pred)
+
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+
+What is the accuracy of the above experiment? How can we compute this from the confusion matrix??
+
+```{r} 
+# Binarizing preprocessed SVM trainset 
+binarized_svm_trainset <- svm_trainset
+for (col in colnames(binarized_svm_trainset)) { 
+  if (col != "label") { 
+    binarized_svm_trainset[, c(col)] <- ifelse(binarized_svm_trainset[, c(col)] > 131, 1, 0) } } 
+for (col in colnames(binarized_svm_trainset)) { if (col != "label") { binarized_svm_trainset[, c(col)] <- as.factor(binarized_svm_trainset[, c(col)]) } }
+
+cols_to_remove = c() 
+for (col in colnames(binarized_svm_trainset)) { 
+  if (col != "label") { 
+    if (length(unique(binarized_svm_trainset[, c(col)])) == 1) { 
+      cols_to_remove <- c(cols_to_remove, col) } } }
+
+binarized_svm_trainset <- binarized_svm_trainset[-which(colnames(binarized_svm_trainset) %in% cols_to_remove)]
+```
+Testing SVM with kernals
+```{r} 
+all_results <- data.frame(orig=c(), pred=c())
+for (k in 1:kfolds) {
+  new_test <- binarized_svm_trainset[holdout[[k]], ]
+  new_train <- binarized_svm_trainset[-holdout[[k]], ]
+  
+  new_test_no_label <- new_test[-c(1)]
+  new_test_just_label <- new_test[c(1)]
+  
+  test_model <- svm(label ~ ., new_train, na.action=na.pass) 
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+}
+table(all_results$orig, all_results$pred)
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+Polynomial Kernel
+```{r} 
+all_results <- data.frame(orig=c(), pred=c())
+for (k in 1:kfolds) {
+  new_test <- binarized_svm_trainset[holdout[[k]], ]
+  new_train <- binarized_svm_trainset[-holdout[[k]], ]
+  
+  new_test_no_label <- new_test[-c(1)]
+  new_test_just_label <- new_test[c(1)]
+  
+  test_model <- svm(label ~ ., new_train, kernel="polynomial", na.action=na.pass)
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+}
+table(all_results$orig, all_results$pred)
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+Sigmoid Kernel
+```{r} 
+all_results <- data.frame(orig=c(), pred=c())
+for (k in 1:kfolds) {
+  new_test <- binarized_svm_trainset[holdout[[k]], ]
+  new_train <- binarized_svm_trainset[-holdout[[k]], ]
+  
+  new_test_no_label <- new_test[-c(1)]
+  new_test_just_label <- new_test[c(1)]
+  
+  test_model <- svm(label ~ ., new_train, kernel="sigmoid", na.action=na.pass)
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+}
+table(all_results$orig, all_results$pred)
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+Radial Kernel
+```{r} 
+all_results <- data.frame(orig=c(), pred=c())
+for (k in 1:kfolds) {
+  new_test <- binarized_svm_trainset[holdout[[k]], ]
+  new_train <- binarized_svm_trainset[-holdout[[k]], ]
+  
+  new_test_no_label <- new_test[-c(1)]
+  new_test_just_label <- new_test[c(1)]
+  
+  test_model <- svm(label ~ ., new_train, kernel="radial", na.action=na.pass)
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+}
+table(all_results$orig, all_results$pred)
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+
+### Random Forest
+
+```{r}
+all_results <- data.frame(orig=c(), pred=c())
+for (k in 1:kfolds) {
+  new_test <- trainset[holdout[[k]], ] 
+  new_train <- trainset[-holdout[[k]], ]
+  new_test_no_label <- new_test[-c(1)] 
+  new_test_just_label <- new_test[c(1)]
+  test_model <- randomForest(label ~ ., new_train, na.action=na.pass) 
+  pred <-  predict(test_model, new_test_no_label, type=c("class"))
+  all_results <- rbind(all_results,
+                       data.frame(orig=new_test_just_label$label, pred=pred))
+}
+table(all_results$orig, all_results$pred)
+
+get_accuracy_rate(table(all_results$orig, all_results$pred),
+                  length(all_results$pred))
+```
+
+```{r}
+prev_result <- 0
+best_result <- 0 
+best_number_trees <-0 
+for (trees in 5:15) {
+  if (trees %% 5 == 0){
+    all_results <- data.frame(orig=c(), pred=c())
+    for (k in 1:kfolds) {
+      new_test <- trainset[holdout[[k]], ]
+      new_train <- trainset[-holdout[[k]], ]
+      new_test_no_label <- new_test[-c(1)] 
+      new_test_just_label <- new_test[c(1)]
+      test_model <- randomForest(label ~ ., new_train, replace=TRUE,
+                                 na.action=na.pass)
+      pred <- predict(test_model, new_test_no_label, type=c("class"))
+      all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+    }
+    #table(all_results$orig, all_results$pred)
+    new_result <- get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+    if (new_result > prev_result) {
+      prev_result <- new_result
+    } else {
+      best_number_trees <- trees 
+      best_result <- new_result 
+      break
+    } }
+}
+paste("Best Number of Trees:", best_number_trees, "- Best Result:", best_result, sep=" ")
+## [1] "Best Number of Trees: 10 - Best Result: 93.2698412698413"
+table(all_results$orig, all_results$pred)
+get_accuracy_rate(table(all_results$orig, all_results$pred),
+                  length(all_results$pred))
+
+```
