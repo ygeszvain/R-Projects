@@ -1,0 +1,1496 @@
+---
+title: "Corona VIrus and Wealth"
+author: "Anita Adams, Randy Geszvain and Michael O'Keeefe "
+date: "6/12/2020"
+output: word_document
+---
+
+```{r cache = TRUE}
+knitr::opts_current$get(c(
+  "cache",
+  "cache.path",
+  "cache.rebuild",
+  "dependson",
+  "autodep"
+))  
+```
+
+# Introduction
+
+Federal, State and County government officials are developing a whole-of-government approach to COVID-19 infection prevention and management. Key to such an approach is an understanding of where COVID-19 is most likely to spread, most likely to spread the fastest, and cause the most death. At the federal level, having this understanding would allow better allocation of nationally controlled resources such as testing kits, emergency reserve and newly manufactured ventilators, and military medical augmentation. At the state level, medical assets such as people (doctors,  nurses and respirator technical staff), medical equipment, beds, supplies and medicine could be allocated proactively to predicted hotspots across counties and even across state lines where counties with similar demographics border one another.  At both the state and county levels, local governments could better prepare, warn citizens, and tighten recommended and/or required preventative measures
+One hypothesis, among many, is that population demographics related to wealth might provide insight into COVID-19 spread. The government agency responsible for the whole-of-government approach has collected data by state and county regarding population wealth and COVID cases and deaths for two points in time during the pandemic. The agency is interested to know if population wealth is an indicator of per capita COVID cases and deaths, death rate from confirmed cases, rate of change of these factors, and spread to adjacent principalities. 
+This analysis is focused on one of the questions: is population wealth an indicator of death rate from confirmed COVID cases.
+
+# Analysis and Models
+## Load Libraries
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, results ='show',include=TRUE,messages=FALSE)
+
+# install.packages("Mltools")
+library(tidyverse)
+library(forcats)
+library(ggplot2)
+library(dplyr)
+library(stargazer)
+library(caret)
+library(modelr)
+library(Hmisc)
+library(DataExplorer)
+library(usmap)
+library(ggplot2)
+library(skimr)
+library(devtools)
+library(visdat)
+library(cluster)
+library(tidyr)
+library(tidyverse)
+library(forcats)
+library(readr)
+library(dplyr)
+library(arules)
+library(mltools)
+library(arulesViz)
+library(factoextra)
+library(stats)
+library(sqldf)
+
+
+#  Naive Bayes
+
+#install.packages("e1071")
+#install.packages("naivebayes")
+#install.packages("party")
+#install.packages("klaR")
+library(klaR)
+library(e1071)
+library(naivebayes)
+library(party)
+
+# Decision Trees
+
+#install.packages("rpart")
+#install.packages('rattle')
+#install.packages('rpart.plot')
+#install.packages('RColorBrewer')
+#install.packages("Cairo")
+#install.packages("CORElearn")
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+#library(Cairo)
+
+# KNN
+
+#install.packages("class")
+#install.packages("gmodels")
+library(class) 
+library(gmodels)
+library(ggplot2)
+
+
+#Random Forest
+
+#install.packages("randomForest")
+library(randomForest)
+
+#SVM
+
+library(MASS)
+
+# Dimensionality
+
+#install.packages("FactoMineR")
+library(FactoMineR)
+## Warning: package 'FactoMineR' was built under R version 3.5.3
+#install.packages("GLDEX")
+library(GLDEX)
+
+```
+
+## Load Data
+
+```{r}
+ACSData<- read_csv("ACS_full_data_wo_over_60.csv")
+```
+
+```{r, include=FALSE}
+#checking data types to see what may need changing
+nrow(ACSData)
+#str(ACSData)
+```
+
+# Data Cleaning
+
+```{r}
+
+#ACSData %>% drop_na()
+# ACSData <- na.omit(ACSData) dont omit NAs until we have whittled down the attributes. 
+
+ACSData$X1<-factor(ACSData$X1)
+ACSData$STATE<-factor(ACSData$STATE)
+ACSData$COUNTY<-factor(ACSData$COUNTY)
+```
+
+```{r}
+#displaying top 5 rows
+#head(ACSData)
+```
+
+#Variables
+
+```{r}
+plot_str(ACSData)
+```
+
+```{r}
+plot_intro(ACSData)
+```
+
+## Missing Data
+
+```{r}
+
+#Checking for any NA values
+sum(is.na(ACSData))
+
+
+# plot_missing(ACSData)
+
+plot_missing(ACSData[,1:33])
+plot_missing(ACSData[,34:66])
+plot_missing(ACSData[,67:99])
+plot_missing(ACSData[,100:133])
+
+# MOst of the missing data is on the transportation data so we wont use those variables to preserve as many rows as possible
+#head(ACSData)
+```
+
+## EDA
+
+```{r}
+introduce(ACSData)
+```
+
+```{r}
+#glimpse(ACSData)
+#summary(ACSData)
+#skim(ACSData)
+#head(ACSData)
+```
+
+
+```{r}
+CountByState = ACSData[,c(2,5,6,7,8,132,133)]
+head(CountByState)
+str(CountByState)
+
+CountByState_agg = aggregate(CountByState[,c(2,3,4,5,6,7)],
+                by = list(ACSData$STATE),
+                FUN = sum)
+
+names(CountByState_agg)[names(CountByState_agg) == "Group.1"] <- "state"
+
+head(CountByState_agg)
+```
+
+```{r}
+CountByState_agg$'Confirmed_Increased_Perc' <- ((CountByState_agg$'4_22_Confirmed' - CountByState_agg$'4_16_Confirmed') / CountByState_agg$'4_16_Confirmed') * 100
+
+CountByState_agg$'Deaths_Increased_Perc' <- ((CountByState_agg$'4_22_Deaths' - CountByState_agg$'4_16_Deaths') / CountByState_agg$'4_16_Deaths') * 100
+
+CountByState_agg$'Confirmed_Increased_Perc' <- round(CountByState_agg$'Confirmed_Increased_Perc', 2)
+
+CountByState_agg$'Deaths_Increased_Perc' <- round(CountByState_agg$'Deaths_Increased_Perc', 2)
+
+head(CountByState_agg)
+```
+
+```{r}
+# create groups
+
+CountByState_agg_0422C = CountByState_agg[,c(1,2)]
+head(CountByState_agg_0422C)
+
+CountByState_agg_0422D= CountByState_agg[,c(1,3)]
+head(CountByState_agg_0422D)
+
+CountByState_agg_0416C= CountByState_agg[,c(1,4)]
+head(CountByState_agg_0416C)
+
+CountByState_agg_0416D= CountByState_agg[,c(1,5)]
+head(CountByState_agg_0416D)
+
+CountByState_agg_DeathRise= CountByState_agg[,c(1,6)]
+head(CountByState_agg_DeathRise)
+
+CountByState_agg_ConfirmedRise= CountByState_agg[,c(1,7)]
+head(CountByState_agg_ConfirmedRise)
+
+```
+
+```{r}
+#order from high to low with '4_22_Confirmed'
+CountByState_agg_0422C[order(-CountByState_agg$'4_22_Confirmed'),]
+#order from high to low with '4_22_Deaths'
+CountByState_agg_0422D[order(-CountByState_agg$'4_22_Deaths'),]
+#order from high to low with '4_16_Confirmed'
+CountByState_agg_0416C[order(-CountByState_agg$'4_16_Confirmed'),]
+#order from high to low with '4_16_Deaths'
+CountByState_agg_0416D[order(-CountByState_agg$'4_16_Deaths'),]
+#order from high to low with 'Death_Rise_4_16_to_20'
+CountByState_agg_DeathRise[order(-CountByState_agg$'Death_Rise_4_16_to_20'),]
+#order from high to low with 'Confirmed_Rise_4_16_to_20'
+CountByState_agg_ConfirmedRise[order(-CountByState_agg$'Confirmed_Rise_4_16_to_20'),]
+```
+
+```{r}
+plot_usmap(data = CountByState_agg_0422C, values = "4_22_Confirmed", color = "red") + 
+  scale_fill_continuous(low = "white", high = "red", name = "04/22 COVID-19 Confirmed", label = scales::comma) + 
+  theme(legend.position = "right")
+
+plot_usmap(data = CountByState_agg_0422D, values = "4_22_Deaths", color = "red") + 
+  scale_fill_continuous(low = "white", high = "red", name = "04/22 COVID-19 Deaths", label = scales::comma) + 
+  theme(legend.position = "right")
+
+plot_usmap(data = CountByState_agg_0416C, values = "4_16_Confirmed", color = "red") + 
+  scale_fill_continuous(low = "white", high = "red", name = "04/16 COVID-19 Confirmed", label = scales::comma) + 
+  theme(legend.position = "right")
+
+plot_usmap(data = CountByState_agg_0416D, values = "4_16_Deaths", color = "red") + 
+  scale_fill_continuous(low = "white", high = "red", name = "04/16 COVID-19 Deaths", label = scales::comma) + 
+  theme(legend.position = "right")
+
+plot_usmap(data = CountByState_agg_DeathRise, values = "Death_Rise_4_16_to_20", color = "red") + 
+  scale_fill_continuous(low = "white", high = "red", name = "COVID-19 Deaths Increased\nfrom 04/16 to 04/22", label = scales::comma) + 
+  theme(legend.position = "right")
+
+plot_usmap(data = CountByState_agg_ConfirmedRise, values = "Confirmed_Rise_4_16_to_20", color = "red") + 
+  scale_fill_continuous(low = "white", high = "red", name = "COVID-19 Confirmed Increased\nfrom 04/16 to 04/22", label = scales::comma) + 
+  theme(legend.position = "right")
+```
+
+```{r}
+
+#Barplot 4_22_Confirmed
+par(mar=c(11,4,2,4))
+barplot(CountByState_agg$'4_22_Confirmed',
+main = "Infected with COVID-19 0422 Confirmed",
+names = CountByState_agg$STATE,
+col = "darkred",
+las=2,
+horiz = FALSE)
+
+#Barplot 4_22_Deaths
+barplot(CountByState_agg$'4_22_Deaths',
+main = "Infected with COVID-19 0422 Deaths",
+names = CountByState_agg$STATE,
+col = "darkred",
+las=2,
+horiz = FALSE)
+
+#Barplot 4_16_Confirmed
+barplot(CountByState_agg$'4_16_Confirmed',
+main = "Infected with COVID-19 0416 Confirmed",
+names = CountByState_agg$STATE,
+col = "darkred",
+las=2,
+horiz = FALSE)
+
+#Barplot 4_16_Deaths
+barplot(CountByState_agg$'4_16_Deaths',
+main = "Infected with COVID-19 0416 Deaths",
+names = CountByState_agg$STATE,
+col = "darkred",
+las=2,
+horiz = FALSE)
+
+#Barplot Death_Rise_4_16_to_20
+barplot(CountByState_agg$'Death_Rise_4_16_to_20',
+main = "Infected with COVID-19 Death Rise 0416 to 0420",
+names = CountByState_agg$STATE,
+col = "darkred",
+las=2,
+horiz = FALSE)
+
+#Barplot Confirmed_Rise_4_16_to_20
+barplot(CountByState_agg$'Confirmed_Rise_4_16_to_20',
+main = "Infected with COVID-19 Confirmed Rise 0416 to 0420",
+names = CountByState_agg$STATE,
+col = "darkred",
+las=2,
+horiz = FALSE)
+```
+
+```{r}
+plot(CountByState_agg$'4_22_Confirmed', CountByState_agg$'4_22_Deaths')
+plot(CountByState_agg$'4_16_Confirmed', CountByState_agg$'4_16_Deaths')
+plot(CountByState_agg$'Confirmed_Rise_4_16_to_20', CountByState_agg$'Death_Rise_4_16_to_20')
+```
+
+```{r}
+boxplot(CountByState_agg$'4_22_Confirmed', main="4_22_Confirmed")
+boxplot(CountByState_agg$'4_22_Deaths', main="4_22_Deaths")
+boxplot(CountByState_agg$'4_16_Confirmed', main="4_16_Confirmed")
+boxplot(CountByState_agg$'4_16_Deaths', main="4_16_Deaths")
+boxplot(CountByState_agg$'Confirmed_Rise_4_16_to_20', main="Confirmed_Rise_4_16_to_20")
+boxplot(CountByState_agg$'Death_Rise_4_16_to_20', main="Death_Rise_4_16_to_20")
+```
+
+```{r}
+plot(CountByState_agg$'4_22_Confirmed', log(CountByState_agg$'4_22_Confirmed'), main="4_22_Confirmed")
+plot(CountByState_agg$'4_22_Deaths', log(CountByState_agg$'4_22_Deaths'), main="4_22_Deaths")
+plot(CountByState_agg$'4_16_Confirmed', log(CountByState_agg$'4_16_Confirmed'), main="4_16_Confirmed")
+plot(CountByState_agg$'4_16_Deaths', log(CountByState_agg$'4_16_Deaths'), main="4_16_Deaths")
+plot(CountByState_agg$'Confirmed_Rise_4_16_to_20', log(CountByState_agg$'Confirmed_Rise_4_16_to_20'), main="Confirmed_Rise_4_16_to_20")
+plot(CountByState_agg$'Death_Rise_4_16_to_20', log(CountByState_agg$'Death_Rise_4_16_to_20'), main="Death_Rise_4_16_to_20")
+```
+
+```{r}
+AggregateByState = ACSData[,2:133]
+AggregateByState = AggregateByState[,-2]
+head(AggregateByState)
+```
+
+```{r}
+AggregateByState %>% drop_na()
+```
+
+
+```{r}
+AggregateByState = ACSData[,2:133]
+AggregateByState = AggregateByState[,-2]
+AggregateByState %>% drop_na()
+head(AggregateByState)
+str(AggregateByState)
+
+AggregateByState_all = aggregate(AggregateByState[,2:131],
+                by = list(AggregateByState$STATE),
+                FUN = sum)
+
+names(AggregateByState_all)[names(AggregateByState_all) == "Group.1"] <- "state"
+
+head(AggregateByState_all)
+```
+
+## Preprocess the data
+
+```{r}
+# Select the subset of attributes we want to include in the analysis and transform / normalize them
+
+D <- data.frame (ACSData)
+#str(D)
+#colnames(D)
+Original_D_Col <- ncol(D)
+```
+
+```{r}
+D$Confirmed_Per_Capita_4_22 <- D$X4_22_Confirmed / D$ET_Total_Population
+D$Deaths_Per_Capita_4_22    <- D$X4_22_Deaths    / D$ET_Total_Population
+D$Deaths_Per_Confirmed_4_22 <- D$Deaths_Per_Capita_4_22 / D$Confirmed_Per_Capita_4_22 # Per Capita is no longer meaningful
+
+D$Confirmed_Per_Capita_4_16 <- D$X4_16_Confirmed / D$ET_Total_Population
+D$Deaths_Per_Capita_4_16    <- D$X4_16_Deaths    / D$ET_Total_Population
+D$Deaths_Per_Confirmed_4_16 <- D$Deaths_Per_Capita_4_16 / D$Confirmed_Per_Capita_4_16 # Per Capita is no longer meaningful
+
+
+D$Two_Week_Confirm_Rate_Per_Capita <- (D$X4_22_Confirmed-D$X4_16_Confirmed)/D$ET_Total_Population
+D$Two_Week_Death_Rate_Per_Capita <- (D$X4_22_Death-D$X4_16_Death)/D$ET_Total_Population
+
+D$Fraction_Female <- D$E_Total_Pop_SEX_Female / D$ET_Total_Population
+
+D$Fraction_White <- D$E_Total_Pop_RACE_White / D$ET_Total_Population
+D$Fraction_Black <- D$E_Total_Pop_RACE_Black / D$ET_Total_Population
+D$Fraction_Other <- (D$E_Total_Pop_RACE_Native_Pop + D$E_Total_Pop_RACE_Asian +
+                     D$E_Total_Pop_RACE_Pacific_Islander + D$E_Total_Pop_RACE_Other_Race +
+                     D$E_Total_Pop_RACE_Two_or_More_Races) / D$ET_Total_Population
+
+D$Hispanic <- D$E_Total_Pop_RACE_Hispanic / D$ET_Total_Population
+
+D$Population_Over_Age_15 <- D$E_Total_Pop_Over_15_EDUCATION_Less_Than_High_School + 
+                          D$E_Total_Pop_Over_15_EDUCATION_High_School_Grad + 
+                          D$E_Total_Pop_Over_15_EDUCATION_Some_College+ 
+                          D$E_Total_Pop_Over_15_EDUCATION_Bachelors_Degree_or_Higher
+D$Fraction_Less_Than_HS <-        D$E_Total_Pop_Over_15_EDUCATION_Less_Than_High_School / D$Population_Over_Age_15
+D$Fraction_High_School_Grad <-    D$E_Total_Pop_Over_15_EDUCATION_High_School_Grad / D$Population_Over_Age_15
+D$Fraction_Some_College <-        D$E_Total_Pop_Over_15_EDUCATION_Some_College / D$Population_Over_Age_15
+D$Fraction_Bachelors_or_Higher <- D$E_Total_Pop_Over_15_EDUCATION_Bachelors_Degree_or_Higher / D$Population_Over_Age_15
+
+D$Fraction_Disabled <- D$E_Total_Pop_DISABILITY_STATUS_Yes / D$ET_Total_Population
+
+D$Fraction__Limited_English <- D$E_Total_Pop_Over_5_LANGUAGE_Limited_English / D$ET_Total_Population
+
+D$Fraction_Unemployed <- D$E_Total_Pop_Over_16_EMPLOYMENT_STATUS_In_Civilian_Labor_Force_Unemployed / 
+                         D$ET_Total_Pop_Over_16_EMPLOYMENT_STATUS_In_Labor_Force
+
+D$Fraction_Below_Poverty_Line <- D$E_Total_Pop_POVERTY_STATUS_Below_100_Percent / D$ET_Total_Population
+D$Fraction_Btwn_100_149_Above_Poverty_Line <- D$E_Total_Pop_POVERTY_STATUS_Btwn_100_149_Percent / D$ET_Total_Population
+D$Fraction_Not_Citizen <- D$E_Total_Pop_CITIZENSHIP_Foreign_Born_Not_US_Citizen / D$ET_Total_Population
+```
+
+```{r}
+# Save the orignial attributes  we still want (first 10) to a dataframe (E) and clean up the naming
+
+E<- D[,1:10]
+#str(E)
+cnames <- colnames(E)
+cnames[1] <- c("ID")
+cnames[5] <- c("Confirmed_4_22")
+cnames[6] <- c("Deaths_4_22")
+cnames[7] <- c("Confirmed_4_16")
+cnames[8] <- c("Deaths_4_16")
+cnames
+colnames(E) <- cnames
+```
+
+```{r}
+# Now add the newly computed attributes to E
+
+Original_D_Col
+New_D_Col <- ncol(D)
+New_D_Col
+D_Col_to_Add <- Original_D_Col+1
+
+E <- data.frame(E,D[,D_Col_to_Add:New_D_Col])
+colnames(E)
+#head(E)
+#str(E)
+```
+
+```{r}
+E$Confirmed_4_16 <- as.numeric(E$Confirmed_4_16)
+E$Deaths_4_16 <- as.numeric(E$Deaths_4_16)
+E$Confirmed_4_22 <- as.numeric(E$Confirmed_4_22)
+E$Deaths_4_22 <- as.numeric(E$Deaths_4_22)
+E$ET_Total_Population <- as.numeric(E$ET_Total_Population)
+```
+
+```{r}
+New_Data <- data.frame(E)
+str(New_Data)
+# Look for any NAs
+sum(is.na(New_Data))
+
+New_Data <- na.omit(New_Data)
+sum(is.na(New_Data))
+```
+
+
+```{r}
+# Look at descriptive statistics
+
+summary(New_Data)
+summary(New_Data$Deaths_Per_Confirmed_4_16)
+
+# Observation: The max death rate is 1 but the third quartile is only 5%.
+```
+
+```{r}
+# Plot deaths per confirmed vs confirmed to examine  the values of "1" 
+
+g <- ggplot(New_Data, aes(x=Confirmed_4_16, y=Deaths_Per_Confirmed_4_16))
+g <- g+ geom_point(shape=1) + ggtitle("Scatter Plot of Normalized Death Rates vs Confirmed Cases")
+g
+
+# Observation: The high death rates are concentrated where the number of confirmed case is very small. Zoom in on the data
+```
+
+```{r}
+DataZoomed<- New_Data[New_Data$Confirmed_4_16<100,]
+
+nrow(DataZoomed)
+g <- ggplot(DataZoomed, aes(x=Confirmed_4_16, y=Deaths_Per_Confirmed_4_16))
+g <- g+ geom_point(shape=1) + ggtitle("Scatter Plot of Normalized Death Rates vs Confirmed Cases Zoomed into Comfirmed<100")
+g
+
+# Observation : There seem to be very few with death rates>.25
+```
+
+```{r}
+BigRatesRow <- which(New_Data$Deaths_Per_Confirmed_4_16>.25)
+BigRatesRow
+
+# Observation: There are 9/ 1476 data points with Death Rate > .25
+```
+
+```{r}
+BigRatesZScore <- (New_Data$Deaths_Per_Confirmed_4_16[BigRatesRow]-mean(New_Data$Deaths_Per_Confirmed_4_16[]))/
+  sd(New_Data$Deaths_Per_Confirmed_4_16)
+BigRatesZScore 
+
+# Observation - all have Zscore > 3 so can be treated as outliers. 
+```
+
+```{r}
+# It would be more systematic for us to see ALL points outside 3 SD
+Threshold <- 3*sd(New_Data$Deaths_Per_Confirmed_4_16) +mean(New_Data$Deaths_Per_Confirmed_4_16)
+Threshold
+
+# Observation: Greater than 3 SD away means Death Rate >.2147. See how many points that is and how many 
+```
+
+```{r}
+# confirmed cases they are associated with
+
+BigRatesRow <- which(New_Data$Deaths_Per_Confirmed_4_16>Threshold)
+BigRatesRow
+New_Data$Confirmed_4_16[BigRatesRow]
+
+# Observation: THere are 14 points and they all were associated with fewer than 7 confirmed cases in the 
+# entire county except one where there were 27 cases. Remove these rows from the data set as outliers.
+```
+
+```{r}
+No_Outliers <- New_Data[New_Data$Deaths_Per_Confirmed_4_16<Threshold,]
+nrow(New_Data)
+nrow(No_Outliers)
+```
+
+```{r}
+# Look at the data now that outliers are removed
+# Plot deaths per confirmed vs confirmed to examine  the values of "1" 
+
+g <- ggplot(No_Outliers, aes(x=Confirmed_4_16, y=Deaths_Per_Confirmed_4_16))
+g <- g+ geom_point(shape=1) + ggtitle("Scatter Plot of Normalized Death Rates vs Confirmed Cases w/ Outliers Removed")
+g
+
+# Observation: That looks better.
+```
+
+```{r}
+str(No_Outliers)
+# Now remove the death and confirmed columns that we won't be using. 
+SmallData <- data.frame(No_Outliers[,-c(5,6,7,8,11,12,14,15,17,18)])
+#str(SmallData)
+```
+
+```{r}
+# Now normalize all of the numeric variables.
+
+Min_Max_function <- function(x) {
+  return( (x-min(x)) / (max(x) - min(x)))
+}
+
+# Test it
+# Min_Max_function(c(1,2,3))
+
+# Apply to the DF
+
+SmallDataNumeric <- SmallData[,-1:-3]
+#str(SmallDataNumeric)
+SmallNorm <- as.data.frame(lapply(SmallDataNumeric,Min_Max_function))
+#str(SmallNorm)
+summary(SmallNorm)
+
+# Now get rid of 4-22 data for now
+
+SmallNorm <- SmallNorm[,-4]
+```
+
+```{r}
+# Now discretize the normalized death rate
+
+# First look at how it is distributed
+
+hist(SmallNorm$Deaths_Per_Confirmed_4_16)
+
+```
+
+```{r}
+# Observation: There are a lot of points in the <.1 range - over 700. Zoom in on that area
+g <- ggplot(SmallNorm, aes(x=Deaths_Per_Confirmed_4_16))
+g <- g+ geom_histogram(binwidth=.025) + ggtitle("Histogram of Normalizes Death Rates Zoomed into binwidth = .025")
+g
+```
+
+```{r}
+# Observation: ~ 600 of the 700 are <.025. Zoom a little more
+g <- ggplot(SmallNorm, aes(x=Deaths_Per_Confirmed_4_16))
+g <- g+ geom_histogram(binwidth=.005)  + ggtitle("Histogram of Normalizes Death Rates Zoomed into binwidth = .005")
+g
+
+# Observation - almost all of the 600 are <.005. Clearly some counties have a very low death rate.
+# Don't want to use .05 as the bucket size becasue that will needlessly increase dimensionality.
+# Use 11  bins. The first will be normalized death rate (NDR) <= .05, the second will be NDR >.05 but
+# less than .1 and the rest will be remaining 9 tenths.
+```
+
+```{r}
+# create bins for each column
+Preprocessed_Data <- SmallNorm
+
+Preprocessed_Data[, "Pop_Density"] <- bin_data(Preprocessed_Data$Pop_Density, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "ET_Total_Population"] <- bin_data(Preprocessed_Data$ET_Total_Population, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "EM_Total_Pop_Median_Age"] <- bin_data(Preprocessed_Data$EM_Total_Pop_Median_Age, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Deaths_Per_Confirmed_4_16"] <- bin_data(Preprocessed_Data$Deaths_Per_Confirmed_4_16, bins=c(0,0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0), binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Female"] <- bin_data(Preprocessed_Data$Fraction_Female, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_White"] <- bin_data(Preprocessed_Data$Fraction_White, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Black"] <- bin_data(Preprocessed_Data$Fraction_Black, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Other"] <- bin_data(Preprocessed_Data$Fraction_Other, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Hispanic"] <- bin_data(Preprocessed_Data$Hispanic, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Less_Than_HS"] <- bin_data(Preprocessed_Data$Fraction_Less_Than_HS, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_High_School_Grad"] <- bin_data(Preprocessed_Data$Fraction_High_School_Grad, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Some_College"] <- bin_data(Preprocessed_Data$Fraction_Some_College, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Bachelors_or_Higher"] <- bin_data(Preprocessed_Data$Fraction_Bachelors_or_Higher, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Disabled"] <- bin_data(Preprocessed_Data$Fraction_Disabled, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction__Limited_English"] <- bin_data(Preprocessed_Data$Fraction__Limited_English, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Unemployed"] <- bin_data(Preprocessed_Data$Fraction_Unemployed, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Below_Poverty_Line"] <- bin_data(Preprocessed_Data$Fraction_Below_Poverty_Line, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Btwn_100_149_Above_Poverty_Line"] <- bin_data(Preprocessed_Data$Fraction_Btwn_100_149_Above_Poverty_Line, bins=10, binType = "explicit")
+
+Preprocessed_Data[, "Fraction_Not_Citizen"] <- bin_data(Preprocessed_Data$Fraction_Not_Citizen, bins=10, binType = "explicit")
+
+counts <- table(Preprocessed_Data$Deaths_Per_Confirmed_4_16)
+barplot(counts, main="Count per Bin for Deaths_Per_Confirmed_4_16", 
+   xlab="Deaths_Per_Confirmed_4_16",las=3)
+```
+
+```{r}
+#saving a csv file
+write.csv(Preprocessed_Data,"Preprocessed_Data.csv", row.names = FALSE)
+```
+
+
+## Classification
+
+```{r}
+# The fully disretized data is for ARM. Only need to discretize the predicted variable for classification so go back to that
+
+ClassData<- SmallNorm
+#str(ClassData)
+ClassData$Bin<-Preprocessed_Data$Deaths_Per_Confirmed_4_16
+
+# Get rid of the non-discretized Deaths Per Confirmed
+
+ClassData <- ClassData[,-4]
+str(ClassData)
+
+```
+
+### Naive Bayes With Cross-Fold Validation
+
+```{r}
+
+#Building a model
+#split data into training and test data sets
+data<-ClassData
+set.seed(300)
+indxTrain <- createDataPartition(y = data$Bin,p = 0.75,list = FALSE)
+training <- data[indxTrain,]
+testing <- data[-indxTrain,] 
+
+#Check dimensions of the split 
+
+#prop.table(table(training$Bin)) * 100
+
+#prop.table(table(testing$Bin)) * 100
+
+# Create variables with and without the bin
+
+x <- training[,-20]
+y <- training$Bin
+
+# Naive Bayesian
+
+model <- train(x,y, 'nb',trControl=trainControl(method='cv',number=5))
+model
+confusionMatrix(model)
+
+# Observation: Model accuracy is 39%. See if it can be tuned
+# Great reference: https://uc-r.github.io/naive_bayes
+
+# set up tuning grid
+search_grid <- expand.grid(
+  usekernel = c(TRUE, FALSE),
+  fL = 0:5,
+  adjust = seq(0, 5, by = 1)
+)
+
+# train model
+
+model2 <- train(x,y, 'nb',trControl=trainControl(method='cv',number=5),
+  tuneGrid = search_grid)
+
+
+# top 5 modesl
+model2$results %>% 
+  top_n(5, wt = Accuracy) %>%
+  arrange(desc(Accuracy))
+  
+  plot(model2)
+  
+  confusionMatrix(model2)
+  
+# Look at predicted results
+
+Prediction <- predict(model, newdata=testing)
+#Results <- table(unlist(Prediction),unlist(testing$Bin))
+#Results <-as.data.frame.matrix(Results)
+#Results
+confusionMatrix(Prediction, testing$Bin)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "NB Tuned Plot")
+
+# Plot variable performance
+
+VarImport <- varImp(model2)
+plot(VarImport)
+```
+
+Observation: Traiing model accuracy up to  44% with kappa .14 and testing to 41%. The model is predicting vales for most bins. The driving variables are population totals, pop over 15 and density - not wealth / poverty indicatros at all.  The variables are not independent so that my be a good reason for the poor results.
+
+
+### KNN with Cross Fold Validation
+
+```{r}
+
+#str(training)
+model <- train(x,y, 'knn',trControl=trainControl(method='cv',number=5), tuneLength=20)
+model
+
+# Look at predicted results
+
+Prediction <- predict(model, newdata=testing)
+#Results <- table(unlist(Prediction),unlist(testing$Bin))
+#Results <-as.data.frame.matrix(Results)
+#Results
+confusionMatrix(Prediction, testing$Bin)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "KNN Plot")
+
+# Plot variable performance
+
+VarImport <- varImp(model)
+plot(VarImport)
+
+```
+
+Observation: 20 values of K were attempted. K=43 was best with an training accuracy of 47% and kappa .18 The testing accuracy is 49% This model is  putting most of the predictions in the first bin and a few in the 3rd and 4th and none elsewhere 
+
+
+### RF with Cross Fold Validation
+
+```{r}
+
+# split data into training and test data sets
+data<-ClassData
+set.seed(300)
+indxTrain <- createDataPartition(y = data$Bin,p = 0.75,list = FALSE)
+training <- data[indxTrain,]
+testing <- data[-indxTrain,] 
+
+#Check dimensions of the split 
+
+#prop.table(table(training$Bin)) * 100
+
+#prop.table(table(testing$Bin)) * 100
+
+# Create variables with and without the bin
+
+x <- training[,-20]
+y <- training$Bin
+
+# Reference : https://machinelearningmastery.com/tune-machine-learning-algorithms-in-r/
+# Create model with default paramters
+
+# mtry: Number of variables randomly sampled as candidates at each split.
+# ntree: Number of trees to grow.(default is 500)
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+seed <- 7
+metric <- "Accuracy"
+set.seed(seed)
+mtry <- sqrt(ncol(x))
+tunegrid <- expand.grid(.mtry=mtry)
+model <- train(Bin~., data=training, method="rf", metric=metric, tuneGrid=tunegrid, trControl=control)
+print(model)
+
+
+# Observation: That yielded about 49% training accuracy. 
+
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "RF Plot")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+
+
+
+# Can we tune it? Tune on mytry using random search
+
+# Random Search
+control <- trainControl(method="repeatedcv", number=10, repeats=3, search="random")
+set.seed(seed)
+mtry <- sqrt(ncol(x))
+model2 <- train(Bin~., data=training, method="rf", metric=metric, tuneLength=15, trControl=control)
+print(model2)
+
+# Random selection of mtry esssentially same  results - ACcuracy = 0.49  Kappa = 0.23
+plot(model2)
+
+# Plot variable performance
+
+VarImport <- varImp(model)
+plot(VarImport)
+
+```
+
+Observation: This produced 49% Testing accuracy and Kappa = .23 but even more that KNN it is putting all the predictions into the first bin. Testing accuracy was 54% with Kappa .27
+
+### Try SVM - Linear
+
+```{r}
+
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+set.seed(3233)
+ 
+model <- train(Bin ~., data = training, method = "svmLinear",
+                 trControl=trctrl,
+                 preProcess = c("center", "scale"),
+                 tuneLength = 10)
+model
+
+# Training accuracy is 49% and Kappa is 18%
+
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "SVM Linear Plot")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+
+# 49% accuracy and kappa ..18 for SVM Linear training and C=1. Test data accuracy = 53% and Kapp = .23
+
+# Tune
+grid <- expand.grid(C = c(0,0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2,5))
+model <- train(Bin ~., data = training, method = "svmLinear",
+                 trControl=trctrl,
+                 preProcess = c("center", "scale"),
+                 tuneGrid = grid,
+                 tuneLength = 10)
+model
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "SVM Linear tuned Plot")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+
+```
+
+Observation:  49% accuracy and kappa .18 for SVM Linear training and C=1. Test data accuracy = 53% and Kapp = .23
+
+Tuned model - 49% accuracy and kapps .18 for training SVM Linear and selected C=1.25 - no real change. This model also predicts only 2 bins
+
+### Try SVM - Radial Basis
+
+```{r}
+
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+set.seed(3233)
+ 
+model <- train(Bin ~., data = training, method = "svmRadial",
+                 trControl=trctrl,
+                 preProcess = c("center", "scale"),
+                 tuneLength = 10)
+model
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "SVM Radial Basis Untuned")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+
+
+# Tune
+grid_radial <- expand.grid(sigma = c(0,0.01, 0.02, 0.025, 0.03, 0.04,
+ 0.05, 0.06, 0.07,0.08, 0.09, 0.1, 0.25, 0.5, 0.75,0.9),
+ C = c(0,0.01, 0.05, 0.1, 0.25, 0.5, 0.75,
+ 1, 1.5, 2,5))
+
+model <- train(Bin ~., data = training, method = "svmRadial",
+                 trControl=trctrl,
+                 preProcess = c("center", "scale"),
+                 tuneGrid = grid_radial,
+                 tuneLength = 10)
+model
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "SVM Radial Basis Tuned Plot")
+
+# Tuning sigma had no impact
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+
+```
+
+Observation: 48% training accuracy with Kappa .16. 51% test accuracy with Kappa .2 SVM Radial Basis, no tuning. No change with tuning
+
+###  Try Dimensionality Reduction and RF
+
+```{r}
+
+# go back to unnormalized and undiscretized data set and get rid of April 22
+
+MyDF <- SmallDataNumeric[,-4]
+# dim(MyDF)
+# str(MyDF)
+
+# Hold out the variable we are trying to predict
+
+Temp <- MyDF[,-4]
+Temp <- t(Temp)
+pca = PCA(Temp)
+
+DigitDF = data.frame(MyDF$Deaths_Per_Confirmed_4_16,pca$var$coord)
+#dim(DigitDF)
+#head(DigitDF)
+#unique(DigitDF$MyDF.label)
+cnames <- colnames(DigitDF)
+cnames[1]<- c("Deaths_Per_Confirmed_4_16")
+colnames(DigitDF)<-cnames
+
+# Normalize then Discretize the Death Rate
+
+
+NormDeathRate <- (DigitDF$Deaths_Per_Confirmed_4_16 - min(DigitDF$Deaths_Per_Confirmed_4_16)) /
+(max(DigitDF$Deaths_Per_Confirmed_4_16)-min(DigitDF$Deaths_Per_Confirmed_4_16))
+ NormDeathRate <- as.data.frame(NormDeathRate)
+ str(NormDeathRate)
+ summary(NormDeathRate)
+ colnames(NormDeathRate)
+
+ NormDeathRate[, "NormDeathRate"] <- bin_data(NormDeathRate$NormDeathRate, bins=c(0,0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0), binType = "explicit")
+
+
+NormDeathRatePCA <- data.frame(NormDeathRate, DigitDF)
+
+NormDeathRatePCA <- NormDeathRatePCA[,-2]
+#summary(NormDeathRatePCA)
+cname<- colnames(NormDeathRatePCA)
+cname
+cname[1]<-c("Bin")
+colnames(NormDeathRatePCA)<-cname
+str(NormDeathRatePCA)
+
+#Try RF again
+
+# Set up the data
+
+#split data into training and test data sets
+data<-NormDeathRatePCA
+set.seed(300)
+indxTrain <- createDataPartition(y = data$Bin,p = 0.75,list = FALSE)
+training <- data[indxTrain,]
+testing <- data[-indxTrain,] 
+
+#Check dimensions of the split 
+
+prop.table(table(training$Bin)) * 100
+
+prop.table(table(testing$Bin)) * 100
+
+# Create variables with and without the bin
+
+x <- training[,-1]
+y <- training$Bin
+
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+seed <- 7
+metric <- "Accuracy"
+set.seed(seed)
+mtry <- sqrt(ncol(x))
+tunegrid <- expand.grid(.mtry=mtry)
+model <- train(Bin~., data=training, method="rf", metric=metric, tuneGrid=tunegrid, trControl=control)
+print(model)
+
+#Observation: That yielded about 47% accuracy. 
+
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "PCA RF Plot")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+
+
+# Can we tune it? Tune on mytry using random search
+
+# Random Search
+control <- trainControl(method="repeatedcv", number=10, repeats=3, search="random")
+set.seed(seed)
+mtry <- sqrt(ncol(x))
+model2 <- train(Bin~., data=training, method="rf", metric=metric, tuneLength=15, trControl=control)
+print(model2)
+
+# That did not improve anything.
+#plot(model2)
+
+Prediction <- predict(model2, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "PCA RF Plot")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+```
+
+### Try to predict everything but the very low death rate and high # cases with RF 
+```{r}
+#- go back to class data
+
+data<-ClassData
+#str(ClassData)
+BiggerCases <- ClassData[ClassData$Bin != "[0, 0.05)",]
+
+# Get rid of that factor ("[0, 0.05)")
+BiggerCases$Bin<-factor(BiggerCases$Bin)
+#str(BiggerCases$Bin)
+
+
+# Try Random Forest
+
+# Set up the data
+
+#split data into training and test data sets
+data<-BiggerCases
+set.seed(300)
+indxTrain <- createDataPartition(y = data$Bin,p = 0.75,list = FALSE)
+training <- data[indxTrain,]
+testing <- data[-indxTrain,] 
+
+#Check dimensions of the split 
+
+prop.table(table(training$Bin)) * 100
+
+prop.table(table(testing$Bin)) * 100
+
+# Create variables with and without the bin
+
+x <- training[,-20]
+y <- training$Bin
+
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+seed <- 7
+metric <- "Accuracy"
+set.seed(seed)
+mtry <- sqrt(ncol(x))
+tunegrid <- expand.grid(.mtry=mtry)
+model <- train(Bin~., data=training, method="rf", metric=metric, tuneGrid=tunegrid, trControl=control)
+print(model)
+
+#Observation: That yielded about 30% accuracy. So the abilty to predict the cases where we have high death rates but fewer cases is very limited.
+
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data")
+plot(  Prediction, ylab = "Density", main = "RF w/o Bin1 Plot")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+```
+
+Observation: That yielded about 30% accuracy. So the abilty to predict the cases where we have high death rates but fewer cases is very limited.
+
+### Try without normalizing the fractional data (Everything but Pop Density, total pop and age)
+
+```{r}
+
+# go back to unnormalized and undiscretized data set and get rid of April 22
+
+MyDF <- SmallDataNumeric[,-4]
+#dim(MyDF)
+#str(MyDF)
+
+summary(MyDF$Deaths_Per_Confirmed_4_16)
+
+ToNorm <- MyDF[,1:3]
+
+ToNorm <- as.data.frame(lapply(ToNorm,Min_Max_function))
+
+MyDF<-MyDF[,-1:-3]
+
+# Save this for running without those variables later
+
+OnlyPovertyDataNotNorm <- MyDF
+
+MyDF<- data.frame(ToNorm, MyDF)
+
+hist(MyDF$Deaths_Per_Confirmed_4_16)
+# Discretize the Death Rate - since not normalized the bins change
+
+ MyDF[, "Deaths_Per_Confirmed_4_16"] <- bin_data(MyDF$Deaths_Per_Confirmed_4_16, bins=c(0,0.01,0.02,0.04, .05,.06,.08,.10,.12,.14,.16,.18,.20) , binType = "explicit")
+
+cname<- colnames(MyDF)
+cname
+cname[4]<-c("Bin")
+colnames(MyDF)<-cname
+table(MyDF$Bin)
+
+
+# Try RF
+#split data into training and test data sets
+data<-MyDF
+set.seed(300)
+indxTrain <- createDataPartition(y = data$Bin,p = 0.75,list = FALSE)
+training <- data[indxTrain,]
+testing <- data[-indxTrain,] 
+
+#Check dimensions of the split 
+
+prop.table(table(training$Bin)) * 100
+
+prop.table(table(testing$Bin)) * 100
+
+# Create variables with and without the bin
+
+x <- training[,-20]
+y <- training$Bin
+
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+seed <- 7
+metric <- "Accuracy"
+set.seed(seed)
+mtry <- sqrt(ncol(x))
+tunegrid <- expand.grid(.mtry=mtry)
+model <- train(Bin~., data=training, method="rf", metric=metric, tuneGrid=tunegrid, trControl=control)
+print(model)
+
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data with New Bins")
+plot(  Prediction, ylab = "Density", main = "RF No NOrm Fractions Plot")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+
+```
+
+### Remove non-wealth variables then use RF
+
+```{r}
+
+MyDF <- OnlyPovertyDataNotNorm 
+
+hist(MyDF$Deaths_Per_Confirmed_4_16)
+# Discretize the Death Rate - since not normalized the bins change
+
+ MyDF[, "Deaths_Per_Confirmed_4_16"] <- bin_data(MyDF$Deaths_Per_Confirmed_4_16, bins=c(0,0.01,0.02,0.04, .05,.06,.08,.10,.12,.14,.16,.18,.20) , binType = "explicit")
+
+cname<- colnames(MyDF)
+cname
+cname[1]<-c("Bin")
+colnames(MyDF)<-cname
+table(MyDF$Bin)
+
+
+# Try RF
+#split data into training and test data sets
+data<-MyDF
+set.seed(300)
+indxTrain <- createDataPartition(y = data$Bin,p = 0.75,list = FALSE)
+training <- data[indxTrain,]
+testing <- data[-indxTrain,] 
+
+#Check dimensions of the split 
+
+prop.table(table(training$Bin)) * 100
+
+prop.table(table(testing$Bin)) * 100
+
+# Create variables with and without the bin
+
+x <- training[,-20]
+y <- training$Bin
+
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+seed <- 7
+metric <- "Accuracy"
+set.seed(seed)
+mtry <- sqrt(ncol(x))
+tunegrid <- expand.grid(.mtry=mtry)
+model <- train(Bin~., data=training, method="rf", metric=metric, tuneGrid=tunegrid, trControl=control)
+print(model)
+
+Prediction <- predict(model, newdata=testing)
+plot(testing$Bin, ylab="Density",main="Test Data with New Bins")
+plot(  Prediction, ylab = "Density", main = "RF Wealth Data Only Plot")
+
+# Results <- table(unlist(Prediction),unlist(testing$Bin))
+# Results <-as.data.frame.matrix(Results)
+# Results
+confusionMatrix(Prediction, testing$Bin)
+# Plot variable performance
+
+VarImport <- varImp(model)
+plot(VarImport)
+
+```
+
+## Clustering
+
+```{r}
+# Seperate dataset by deathrate
+AboveAvgDeath <- sqldf("Select * from E where Deaths_Per_Confirmed_4_16 > 0.0643")
+BelowAvgDeath <- sqldf("Select * from E where Deaths_Per_Confirmed_4_16 < 0.0645")
+TopDeathRate <- sqldf("Select * from AboveAvgDeath where Confirmed_4_22 > 44")
+colnames(TopDeathRate)
+```
+
+```{r}
+# Select attributes for clustering
+
+TopDeathClust <- TopDeathRate[,-c(1:19,28,32)]
+BelowAvgClust <- BelowAvgDeath[,-c(1:19,28,32)]
+```
+
+```{r}
+# K-means
+
+k1 <- kmeans(TopDeathClust, centers = 4, nstart = 25)
+str(k1)
+```
+
+```{r}
+print(k1)
+```
+
+```{r}
+k2 <- kmeans(BelowAvgClust, centers = 4, nstart = 25)
+str(k2)
+```
+
+```{r}
+print(k2)
+```
+
+```{r}
+fviz_cluster(k1, data = TopDeathClust, ellipse.type = "convex",
+             palette = "jco", repel = TRUE, ggtheme = theme_minimal(),
+             geom = "point")
+
+fviz_cluster(k2, data = BelowAvgClust, ellipse.type = "convex",
+             palette = "jco", repel = TRUE, ggtheme = theme_minimal(),
+             geom = "point")
+```
+
+## Association Rule Mining
+
+### Exploring Association rules
+
+```{r}
+associationRules <- apriori(Preprocessed_Data, parameter = list(supp = 0.001, conf = 0.9, maxlen = 4))
+```
+
+```{r}
+inspect(associationRules[1:5])
+```
+
+```{r}
+summary(associationRules)
+```
+
+#### sort top 20 rules by support
+
+```{r}
+associationRules<-sort(associationRules, by="support", decreasing=TRUE)
+inspect(associationRules[1:20])
+```
+
+#### sort top 20 rules by confidence
+
+```{r}
+associationRules<-sort(associationRules, by="confidence", decreasing=TRUE)
+inspect(associationRules[1:20])
+```
+
+#### sort top 20 rules by lift
+
+```{r}
+associationRules<-sort(associationRules, by="lift", decreasing=TRUE)
+inspect(associationRules[1:20])
+```
+
+### Targeting Items
+In this step, we are going to target at five interesting rules by specifying parameters.
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0, 0.05)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0, 0.05)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.05, 0.1)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.05, 0.1)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.1, 0.2)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.1, 0.2)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.2, 0.3)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.2, 0.3)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.3, 0.4)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.3, 0.4)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.4, 0.5)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.4, 0.5)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.5, 0.6)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.5, 0.6)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.6, 0.7)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.6, 0.7)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.7, 0.8)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.7, 0.8)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.8, 0.9)
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.8, 0.9)"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+Support: 0.001
+Confidence: 0.9
+Sort by: confidence
+rhs: Deaths_Per_Confirmed_4_16=[0.9, 1]
+
+```{r}
+associationRules<-apriori(data=Preprocessed_Data, parameter=list(supp=0.001,conf = 0.9), 
+               appearance = list(default="lhs",rhs="Deaths_Per_Confirmed_4_16=[0.9, 1]"),
+               control = list(verbose=F))
+associationRules<-sort(associationRules, decreasing=TRUE,by="confidence")
+inspect(associationRules[1:20])
+```
+
+# Results
+
+# Conclusions
